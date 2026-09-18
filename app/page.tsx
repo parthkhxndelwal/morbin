@@ -63,13 +63,13 @@ export default function Home() {
         </div>
       </main>
 
-      <footer className="relative z-10 mx-auto flex w-full max-w-7xl shrink-0 flex-col gap-1.5 px-6 pb-5 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between sm:px-10 sm:pb-7">
+      <footer className="relative z-10 mx-auto flex w-full max-w-7xl shrink-0 flex-col gap-1.5 px-6 pb-5 text-xs text-neutral-500 sm:flex-row sm:items-center sm:justify-between sm:px-10 sm:pb-7">
         <p>© 2026 Morbin. All rights reserved.</p>
         <div className="flex gap-5">
-          <Link href="/privacy" className="transition-colors hover:text-slate-300">
+          <Link href="/privacy" className="transition-colors hover:text-neutral-300">
             Privacy Policy
           </Link>
-          <Link href="/terms" className="transition-colors hover:text-slate-300">
+          <Link href="/terms" className="transition-colors hover:text-neutral-300">
             Terms &amp; Conditions
           </Link>
         </div>

@@ -56,9 +56,9 @@ export default function PrivacyPage() {
             </section>
           ))}
         </div>
-        <div className="mt-12 border-t border-white/10 pt-6 text-xs text-slate-500">
-          <Link href="/" className="mr-5 transition-colors hover:text-slate-300">Home</Link>
-          <Link href="/terms" className="transition-colors hover:text-slate-300">Terms &amp; Conditions</Link>
+        <div className="mt-12 border-t border-white/10 pt-6 text-xs text-neutral-500">
+          <Link href="/" className="mr-5 transition-colors hover:text-neutral-300">Home</Link>
+          <Link href="/terms" className="transition-colors hover:text-neutral-300">Terms &amp; Conditions</Link>
         </div>
       </div>
     </div>

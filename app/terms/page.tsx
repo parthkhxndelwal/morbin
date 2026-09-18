@@ -60,9 +60,9 @@ export default function TermsPage() {
             </section>
           ))}
         </div>
-        <div className="mt-12 border-t border-white/10 pt-6 text-xs text-slate-500">
-          <Link href="/" className="mr-5 transition-colors hover:text-slate-300">Home</Link>
-          <Link href="/privacy" className="transition-colors hover:text-slate-300">Privacy Policy</Link>
+        <div className="mt-12 border-t border-white/10 pt-6 text-xs text-neutral-500">
+          <Link href="/" className="mr-5 transition-colors hover:text-neutral-300">Home</Link>
+          <Link href="/privacy" className="transition-colors hover:text-neutral-300">Privacy Policy</Link>
         </div>
       </div>
     </div>
