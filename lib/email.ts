@@ -1,7 +1,18 @@
-const RESEND_URL = "https://api.resend.com/emails";
+import { SESv2Client, SendEmailCommand } from "@aws-sdk/client-sesv2";
+
+function sesClient(): SESv2Client | null {
+  const region = process.env.AWS_REGION ?? "";
+  const accessKeyId = process.env.AWS_ACCESS_KEY_ID ?? "";
+  const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY ?? "";
+  if (!region || !accessKeyId || !secretAccessKey) return null;
+  return new SESv2Client({
+    region,
+    credentials: { accessKeyId, secretAccessKey },
+  });
+}
 
 function fromAddress(): string {
-  return process.env.EMAIL_FROM ?? "Morbin <onboarding@resend.dev>";
+  return process.env.EMAIL_FROM ?? "Morbin <no-reply@morbin.space>";
 }
 
 export async function sendEmail({
@@ -13,25 +24,29 @@ export async function sendEmail({
   subject: string;
   html: string;
 }): Promise<{ ok: boolean; id?: string }> {
-  const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) {
-    console.info("[email:dev] no RESEND_API_KEY; skipping send", { to, subject });
+  const client = sesClient();
+  if (!client) {
+    console.info("[email:dev] AWS SES not configured; skipping send", { to, subject });
     return { ok: true };
   }
-  const res = await fetch(RESEND_URL, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ from: fromAddress(), to, subject, html }),
-  });
-  if (!res.ok) {
-    console.error("[email] resend error", res.status, await res.text());
+  try {
+    const out = await client.send(
+      new SendEmailCommand({
+        FromEmailAddress: fromAddress(),
+        Destination: { ToAddresses: [to] },
+        Content: {
+          Simple: {
+            Subject: { Data: subject, Charset: "UTF-8" },
+            Body: { Html: { Data: html, Charset: "UTF-8" } },
+          },
+        },
+      }),
+    );
+    return { ok: true, id: out.MessageId };
+  } catch (error) {
+    console.error("[email] SES send error", error);
     return { ok: false };
   }
-  const body = (await res.json()) as { id?: string };
-  return { ok: true, id: body.id };
 }
 
 export function appUrl(path = ""): string {
