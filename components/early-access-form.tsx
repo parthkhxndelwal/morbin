@@ -40,7 +40,7 @@ export function EarlyAccessForm({ compact = false }: { compact?: boolean }) {
         </span>
         <div>
           <p className="text-sm font-semibold text-white">You&apos;re on the list.</p>
-          <p className="text-sm text-slate-400">We&apos;ll reach out when early access opens.</p>
+          <p className="text-sm text-neutral-400">We&apos;ll reach out when early access opens.</p>
         </div>
       </div>
     );
@@ -56,12 +56,12 @@ export function EarlyAccessForm({ compact = false }: { compact?: boolean }) {
           onChange={(e) => setEmail(e.target.value)}
           placeholder="you@example.com"
           aria-label="Email address"
-          className="w-full rounded-full border border-white/15 bg-white/5 px-5 py-3.5 text-sm text-white outline-none placeholder:text-slate-500 focus:border-violet-400/60 sm:border-0 sm:bg-transparent sm:p-0"
+          className="w-full rounded-full border border-white/15 bg-white/5 px-5 py-3.5 text-sm text-white outline-none placeholder:text-neutral-500 focus:border-violet-400/60 sm:border-0 sm:bg-transparent sm:p-0"
         />
         <button
           type="submit"
           disabled={status === "loading"}
-          className="inline-flex shrink-0 items-center justify-center gap-2 rounded-full bg-white px-7 py-3.5 text-xs font-bold uppercase tracking-widest text-slate-950 transition-colors hover:bg-violet-200 disabled:opacity-60"
+          className="inline-flex shrink-0 items-center justify-center gap-2 rounded-full bg-white px-7 py-3.5 text-xs font-bold uppercase tracking-widest text-neutral-950 transition-colors hover:bg-violet-200 disabled:opacity-60"
         >
           {status === "loading" ? "Joining…" : "Get early access"}
           <ArrowRight className="h-4 w-4" />
@@ -69,7 +69,7 @@ export function EarlyAccessForm({ compact = false }: { compact?: boolean }) {
       </div>
       {status === "error" && <p className="mt-3 text-sm text-rose-300">{message}</p>}
       {!compact && (
-        <p className="mt-3 text-xs text-slate-500">
+        <p className="mt-3 text-xs text-neutral-500">
           One email when we launch. No spam, ever.
         </p>
       )}

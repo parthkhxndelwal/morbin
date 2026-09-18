@@ -53,7 +53,7 @@ export default function Home() {
       <main className="relative z-10 mx-auto flex w-full max-w-7xl min-h-0 flex-1 items-center px-6 sm:px-10">
         <div className="mx-auto flex w-full max-w-2xl flex-col items-center py-4 text-center lg:max-w-4xl">
           <HeroTitle />
-          <p className="mt-4 max-w-md text-[clamp(0.9rem,2.5vw,1.125rem)] leading-relaxed text-slate-400 [@media(max-height:700px)]:mt-2 [@media(max-height:700px)]:hidden sm:[@media(max-height:700px)]:block">
+          <p className="mt-4 max-w-md text-[clamp(0.9rem,2.5vw,1.125rem)] leading-relaxed text-neutral-400 [@media(max-height:700px)]:mt-2 [@media(max-height:700px)]:hidden sm:[@media(max-height:700px)]:block">
             We&apos;re building something new for people who bring people
             together. Morbin is in stealth — join the list to get in early.
           </p>

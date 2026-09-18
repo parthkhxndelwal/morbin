@@ -39,7 +39,7 @@ const sections = [
 
 export default function PrivacyPage() {
   return (
-    <div className="min-h-screen bg-[#060614] font-sans text-slate-300 antialiased">
+    <div className="min-h-screen bg-[#060614] font-sans text-neutral-300 antialiased">
       <div className="mx-auto max-w-3xl px-6 py-14 sm:px-10">
         <Link href="/" className="text-lg font-extrabold lowercase tracking-tight text-white">
           morbin
@@ -47,7 +47,7 @@ export default function PrivacyPage() {
         <h1 className="mt-10 text-3xl font-bold tracking-tight text-white sm:text-4xl">
           Privacy Policy
         </h1>
-        <p className="mt-2 text-sm text-slate-500">Effective date: 18 September 2026</p>
+        <p className="mt-2 text-sm text-neutral-500">Effective date: 18 September 2026</p>
         <div className="mt-10 space-y-8">
           {sections.map((s) => (
             <section key={s.h}>
