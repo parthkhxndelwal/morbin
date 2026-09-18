@@ -3,7 +3,7 @@
 import { useRef } from "react";
 import { VariableProximity } from "./variable-proximity";
 
-const LINES = ["Organising", "events,", "minus the", "hard part."];
+const LINES = ["Organising events,", "minus the hard part."];
 
 export function HeroTitle() {
   const containerRef = useRef<HTMLDivElement>(null);
