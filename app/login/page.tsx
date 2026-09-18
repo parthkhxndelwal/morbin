@@ -1,10 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useState } from "react";
 import { signIn } from "next-auth/react";
 
-export default function LoginPage() {
+function LoginForm() {
+  const registered = useSearchParams().get("registered") === "1";
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -33,13 +35,17 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-dvh items-center justify-center bg-[#060614] px-6 font-sans text-white antialiased">
-      <div className="w-full max-w-sm">
-        <Link href="/" className="text-lg font-extrabold lowercase tracking-tight">
-          morbin
-        </Link>
+    <div className="w-full max-w-sm">
+      <Link href="/" className="text-lg font-extrabold lowercase tracking-tight">
+        morbin
+      </Link>
         <h1 className="mt-8 text-2xl font-bold tracking-tight">Welcome back</h1>
         <p className="mt-1 text-sm text-neutral-400">Sign in to your organizer account.</p>
+        {registered && (
+          <p role="status" className="mt-4 rounded-2xl border border-emerald-400/30 bg-emerald-500/10 p-4 text-sm text-emerald-200">
+            Account created. Verify your email, then sign in below.
+          </p>
+        )}
         <button
           onClick={() => signIn("google", { callbackUrl: "/onboarding" })}
           className="mt-6 w-full rounded-full border border-white/15 bg-white/5 px-5 py-3 text-sm font-semibold transition-colors hover:bg-white/10"
@@ -83,7 +89,16 @@ export default function LoginPage() {
             Create an account
           </Link>
         </p>
-      </div>
+    </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <div className="flex min-h-dvh items-center justify-center bg-[#060614] px-6 font-sans text-white antialiased">
+      <Suspense>
+        <LoginForm />
+      </Suspense>
     </div>
   );
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { signIn } from "next-auth/react";
 
@@ -15,8 +16,8 @@ export default function RegisterPage() {
   const [values, setValues] = useState({ name: "", email: "", password: "" });
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<Field, string>>>({});
   const [formError, setFormError] = useState("");
-  const [done, setDone] = useState(false);
   const [loading, setLoading] = useState(false);
+  const router = useRouter();
 
   function set<K extends Field>(field: K, value: string) {
     setValues((v) => ({ ...v, [field]: value }));
@@ -56,7 +57,7 @@ export default function RegisterPage() {
         setFormError(body.error ?? "Registration failed.");
         return;
       }
-      setDone(true);
+      router.push("/login?registered=1");
     } catch {
       setFormError("Something went wrong. Please try again.");
     } finally {
@@ -92,20 +93,8 @@ export default function RegisterPage() {
         </Link>
         <h1 className="mt-8 text-2xl font-bold tracking-tight">Create your account</h1>
         <p className="mt-1 text-sm text-neutral-400">Start organizing events in minutes.</p>
-        {done ? (
-          <div className="mt-6 rounded-2xl border border-white/15 bg-white/5 p-5 text-sm">
-            <p className="font-semibold">Check your inbox.</p>
-            <p className="mt-1 text-neutral-400">
-              We sent a verification link to {values.email}. Verify, then{" "}
-              <Link href="/login" className="text-white underline">
-                sign in
-              </Link>
-              .
-            </p>
-          </div>
-        ) : (
-          <>
-            <button
+        <>
+          <button
               onClick={() => signIn("google", { callbackUrl: "/onboarding" })}
               className="mt-6 w-full rounded-full border border-white/15 bg-white/5 px-5 py-3 text-sm font-semibold transition-colors hover:bg-white/10"
             >
@@ -144,7 +133,6 @@ export default function RegisterPage() {
               </button>
             </form>
           </>
-        )}
         <p className="mt-6 text-center text-sm text-neutral-400">
           Already have an account?{" "}
           <Link href="/login" className="font-semibold text-white hover:underline">
