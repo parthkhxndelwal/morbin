@@ -39,10 +39,10 @@ export default function Home() {
           mouseStrength={0}
         />
       </div>
-      {/* legibility gradient — keeps text readable over the tunnel */}
+      {/* legibility halo — keeps centered text readable over the tunnel */}
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-0 bg-gradient-to-r from-[#060614] via-[#060614]/55 to-transparent"
+        className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_65%_60%_at_50%_45%,rgba(6,6,20,0.78),transparent)]"
       />
 
       {/* logo only — no nav */}
@@ -51,13 +51,13 @@ export default function Home() {
       </header>
 
       <main className="relative z-10 mx-auto flex w-full max-w-7xl min-h-0 flex-1 items-center px-6 sm:px-10">
-        <div className="w-full max-w-xl py-4">
+        <div className="mx-auto flex w-full max-w-2xl flex-col items-center py-4 text-center">
           <HeroTitle />
           <p className="mt-4 max-w-md text-[clamp(0.9rem,2.5vw,1.125rem)] leading-relaxed text-slate-400 [@media(max-height:700px)]:mt-2 [@media(max-height:700px)]:hidden sm:[@media(max-height:700px)]:block">
             We&apos;re building something new for people who bring people
             together. Morbin is in stealth — join the list to get in early.
           </p>
-          <div className="mt-6 max-w-md [@media(max-height:700px)]:mt-4">
+          <div className="mt-6 w-full max-w-md [@media(max-height:700px)]:mt-4">
             <EarlyAccessForm compact />
           </div>
         </div>
