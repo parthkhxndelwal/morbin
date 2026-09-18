@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
+import { getDb } from "@/lib/db";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
- * Early-access signup.
- * If RESEND_API_KEY + RESEND_AUDIENCE_ID are set, the email is added to the
- * Resend audience. Otherwise the signup is logged so no address is silently
- * dropped during development — wire a store before public launch.
+ * Early-access signup. Stores the address in the `waitlist` collection
+ * (unique per email) and returns success. Confirmation emails are sent
+ * at launch from this list — nothing is sent at signup time.
  */
 export async function POST(request: Request) {
   let email = "";
@@ -24,29 +24,23 @@ export async function POST(request: Request) {
     );
   }
 
-  const apiKey = process.env.RESEND_API_KEY;
-  const audienceId = process.env.RESEND_AUDIENCE_ID;
-
-  if (apiKey && audienceId) {
-    const res = await fetch(`https://api.resend.com/audiences/${audienceId}/contacts`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ email }),
+  const db = await getDb();
+  try {
+    await db.collection("waitlist").createIndex({ email: 1 }, { unique: true });
+    await db.collection("waitlist").insertOne({
+      email,
+      source: "landing",
+      createdAt: new Date(),
     });
-    // Resend returns 409 if the contact already exists — still a success for us.
-    if (!res.ok && res.status !== 409) {
-      console.error("[early-access] resend error", res.status, await res.text());
+  } catch (error) {
+    // Duplicate email (code 11000) still counts as success for the user.
+    if (!(error instanceof Error && "code" in error && error.code === 11000)) {
+      console.error("[early-access] store failed", error);
       return NextResponse.json(
         { error: "Something went wrong. Please try again." },
-        { status: 502 },
+        { status: 500 },
       );
     }
-    return NextResponse.json({ ok: true });
   }
-
-  console.info("[early-access] signup (no Resend configured yet)", { email });
   return NextResponse.json({ ok: true });
 }

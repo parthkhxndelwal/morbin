@@ -46,5 +46,6 @@ export async function ensureIndexes(): Promise<void> {
     db.collection("tickets").createIndex({ orderId: 1 }),
     db.collection("razorpayWebhooks").createIndex({ providerEventId: 1 }, { unique: true }),
     db.collection("emailDeliveries").createIndex({ status: 1 }),
+    db.collection("waitlist").createIndex({ email: 1 }, { unique: true }),
   ]);
 }
