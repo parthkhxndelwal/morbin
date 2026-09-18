@@ -12,10 +12,62 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const siteUrl =
+  process.env.NEXT_PUBLIC_APP_URL ?? "https://morbin.parthkhandelwal-dev.workers.dev";
+
 export const metadata: Metadata = {
-  title: "Morbin — Something new for event organisers",
+  metadataBase: new URL(siteUrl),
+  title: {
+    default: "Morbin — Early Access for Event Organisers",
+    template: "%s — Morbin",
+  },
   description:
-    "Morbin is in stealth. Join the early-access list for a new way to organise events.",
+    "Morbin is a new platform for people who organise events. Join the early-access list and be first in when we launch.",
+  keywords: [
+    "Morbin",
+    "event organiser",
+    "event planning",
+    "early access",
+    "event management",
+  ],
+  authors: [{ name: "Morbin" }],
+  creator: "Morbin",
+  alternates: { canonical: "/" },
+  openGraph: {
+    type: "website",
+    locale: "en_US",
+    url: siteUrl,
+    siteName: "Morbin",
+    title: "Morbin — Early Access for Event Organisers",
+    description:
+      "A new platform for people who organise events. Join the early-access list.",
+  },
+  twitter: {
+    card: "summary",
+    title: "Morbin — Early Access for Event Organisers",
+    description:
+      "A new platform for people who organise events. Join the early-access list.",
+  },
+  robots: {
+    index: true,
+    follow: true,
+  },
+};
+
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      name: "Morbin",
+      url: siteUrl,
+    },
+    {
+      "@type": "WebSite",
+      name: "Morbin",
+      url: siteUrl,
+    },
+  ],
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -24,7 +76,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+        />
+        {children}
+      </body>
     </html>
   );
 }
