@@ -10,7 +10,7 @@ export function HeroTitle() {
 
   return (
     <div ref={containerRef}>
-      <h1 className="text-[clamp(2.4rem,9vw,4.5rem)] font-bold leading-[1.04] tracking-tight lg:text-[clamp(3rem,6vw,5.5rem)]">
+      <h1 className="text-[clamp(2.4rem,9vw,4.5rem)] font-bold leading-[1.04] tracking-tight lg:text-[clamp(2.25rem,4.5vw,4rem)]">
         {LINES.map((line) => (
           <span key={line} className="block">
             <VariableProximity
