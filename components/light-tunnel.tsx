@@ -6,7 +6,7 @@
  * adapted for Next.js + strict TypeScript. Renders with `ogl`.
  */
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Mesh, Program, Renderer, Triangle } from "ogl";
 
 export type FlowDirection = "inward" | "outward";
@@ -234,6 +234,7 @@ export function LightTunnel({
   className = "",
 }: LightTunnelProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const [ready, setReady] = useState(false);
   const mouseEnabledRef = useRef<boolean>(mouseInteraction);
   const mouseStrengthRef = useRef<number>(mouseStrength);
 
@@ -312,6 +313,7 @@ export function LightTunnel({
     const ro = new ResizeObserver(setSize);
     ro.observe(container);
     setSize();
+    requestAnimationFrame(() => setReady(true));
 
     let raf = 0;
     let isVisible = true;
@@ -483,7 +485,9 @@ export function LightTunnel({
     <div
       ref={containerRef}
       aria-hidden="true"
-      className={`relative h-full w-full overflow-hidden ${className}`.trim()}
+      className={`relative h-full w-full overflow-hidden transition-opacity duration-[1200ms] ease-out ${
+        ready ? "opacity-100" : "opacity-0"
+      } ${className}`.trim()}
     />
   );
 }
