@@ -24,7 +24,15 @@ export default function RegisterPage() {
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(body.error ?? "Registration failed.");
+        const fields = body.issues?.fieldErrors as
+          | Record<string, string[]>
+          | undefined;
+        const detail = fields
+          ? Object.values(fields)
+              .flat()
+              .join(" ")
+          : null;
+        setError(detail ?? body.error ?? "Registration failed.");
         return;
       }
       setDone(true);
