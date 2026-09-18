@@ -1,6 +1,6 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "morbin",
+  "name": "morbin-dev",
   "compatibility_date": "2026-09-18",
   "compatibility_flags": ["nodejs_compat"],
   "main": "./.open-next/worker.js",
@@ -9,6 +9,6 @@
     "binding": "ASSETS"
   },
   "vars": {
-    "MORBIN_DB": "morbin_db"
+    "MORBIN_DB": "test_morbin_db"
   }
 }

@@ -1,8 +1,8 @@
-name: Deploy to Cloudflare Workers
+name: Deploy staging to Cloudflare Workers
 
 on:
   push:
-    branches: [main]
+    branches: [dev]
 
 jobs:
   deploy:
@@ -10,7 +10,7 @@ jobs:
     permissions:
       contents: read
     env:
-      NEXT_PUBLIC_APP_URL: https://morbin.parthkhandelwal-dev.workers.dev
+      NEXT_PUBLIC_APP_URL: https://morbin-dev.parthkhandelwal-dev.workers.dev
       NEXT_PUBLIC_RAZORPAY_KEY_ID: rzp_test_TdZnvBU8mAc2NT
     steps:
       - name: Checkout
@@ -28,7 +28,7 @@ jobs:
       - name: Build Worker
         run: npx opennextjs-cloudflare build
 
-      - name: Deploy to Cloudflare Workers
-        run: npx opennextjs-cloudflare deploy
+      - name: Deploy staging to Cloudflare Workers
+        run: npx opennextjs-cloudflare deploy --config wrangler.dev.jsonc
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
