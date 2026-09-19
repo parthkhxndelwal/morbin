@@ -24,11 +24,23 @@ function LoginForm() {
     });
     setLoading(false);
     if (res?.error) {
-      setError(
-        res.error === "EMAIL_NOT_VERIFIED"
-          ? "Please verify your email before signing in."
-          : "Invalid email or password.",
-      );
+      if (res.error === "EMAIL_NOT_VERIFIED") {
+        // Auto-renew the verification link so the user is never stuck.
+        try {
+          await fetch("/api/auth/resend-verification", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email }),
+          });
+        } catch {
+          /* non-fatal */
+        }
+        setError(
+          "Your email isn't verified yet — we just sent a fresh verification link. Check your inbox, then sign in.",
+        );
+      } else {
+        setError("Invalid email or password.");
+      }
       return;
     }
     window.location.href = res?.url ?? "/onboarding";
