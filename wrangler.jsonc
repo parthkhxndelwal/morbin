@@ -8,6 +8,9 @@
     "directory": "./.open-next/assets",
     "binding": "ASSETS"
   },
+  "routes": [
+    { "pattern": "morbin.space", "zone_name": "morbin.space", "custom_domain": true }
+  ],
   "vars": {
     "MORBIN_DB": "morbin_db"
   }
