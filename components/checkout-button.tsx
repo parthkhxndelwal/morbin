@@ -3,10 +3,11 @@
 import { useEffect, useRef, useState } from "react";
 
 interface CreatedOrder {
-  keyId: string;
-  razorpayOrderId: string;
+  keyId?: string;
+  razorpayOrderId?: string;
   orderId: string;
   totalPaise: number;
+  free?: boolean;
 }
 
 declare global {
@@ -46,28 +47,32 @@ export function CheckoutButton({
   onError: (message: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const completedRef = useRef(false);
+  const cancelledRef = useRef(false);
 
   useEffect(
     () => () => {
-      if (pollRef.current) clearInterval(pollRef.current);
+      cancelledRef.current = true;
     },
     [],
   );
 
   async function poll(orderId: string) {
     for (let i = 0; i < 40; i++) {
+      if (cancelledRef.current || completedRef.current) return;
       await new Promise((r) => setTimeout(r, 3000));
+      if (cancelledRef.current || completedRef.current) return;
       try {
         const res = await fetch(`/api/orders/${orderId}`);
         const body = await res.json().catch(() => ({}));
         if (body.status === "PAID") {
-          if (pollRef.current) clearInterval(pollRef.current);
+          completedRef.current = true;
+          setBusy(false);
           onPaid(orderId);
           return;
         }
         if (body.status === "FAILED" || body.status === "EXPIRED") {
-          if (pollRef.current) clearInterval(pollRef.current);
+          setBusy(false);
           onError("Payment did not complete. Please try again.");
           return;
         }
@@ -75,14 +80,25 @@ export function CheckoutButton({
         /* keep polling */
       }
     }
+    setBusy(false);
     onError("Still confirming payment — check your email shortly.");
   }
 
   async function onClick() {
     setBusy(true);
+    completedRef.current = false;
     try {
-      await loadCheckout();
       const order = await createOrder();
+      if (cancelledRef.current) return;
+      // Free orders fulfill immediately — no Razorpay window.
+      if (order.free || order.totalPaise === 0) {
+        completedRef.current = true;
+        setBusy(false);
+        onPaid(order.orderId);
+        return;
+      }
+      await loadCheckout();
+      if (!order.keyId || !order.razorpayOrderId) throw new Error("Checkout unavailable");
       if (!window.Razorpay) throw new Error("Checkout unavailable");
       const rzp = new window.Razorpay({
         key: order.keyId,
@@ -97,6 +113,8 @@ export function CheckoutButton({
         },
         modal: {
           ondismiss: () => {
+            // Suppress the "closed" error when payment already succeeded.
+            if (completedRef.current) return;
             setBusy(false);
             onError("Payment window closed before completion.");
           },

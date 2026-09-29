@@ -106,6 +106,7 @@ export interface Order {
   currency: "INR";
   razorpayOrderId: string;
   razorpayPaymentId?: string | null;
+  razorpayRefundId?: string | null;
   transferId?: string | null;
   transferStatus?: string | null;
   status: OrderStatus;

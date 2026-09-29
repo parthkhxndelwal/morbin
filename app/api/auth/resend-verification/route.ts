@@ -25,7 +25,7 @@ export async function POST(request: Request) {
     token,
     expires: new Date(Date.now() + 1000 * 60 * 60 * 24),
   });
-  const verifyUrl = appUrl(`/verify-email?token=${token}`);
+  const verifyUrl = appUrl(`/auth?token=${token}`);
   await sendEmail({
     to: email,
     subject: "Verify your Morbin email",

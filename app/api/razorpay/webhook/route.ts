@@ -1,29 +1,36 @@
+import { ObjectId } from "mongodb";
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { flushEmailQueue } from "@/lib/email";
+import { fulfillOrderTickets } from "@/lib/fulfillment";
 import {
   createOrganizerTransfer,
   fetchPayment,
   verifyWebhookSignature,
 } from "@/lib/razorpay";
-import { makeTicketCode, signTicket, ticketQrSvg } from "@/lib/tickets";
-import type { EmailRecord, Event, Order, Ticket, WebhookRecord } from "@/lib/types";
+import type { Event, Order, WebhookRecord } from "@/lib/types";
 
 export const runtime = "nodejs";
+
+function oid(id: string): ObjectId | null {
+  try {
+    return new ObjectId(id);
+  } catch {
+    return null;
+  }
+}
 
 async function releaseHold(
   db: Awaited<ReturnType<typeof getDb>>,
   items: { ticketTypeId: string; quantity: number }[],
 ) {
-  const { ObjectId } = await import("mongodb");
   for (const item of items) {
     try {
+      const _id = oid(item.ticketTypeId);
+      if (!_id) continue;
       await db
         .collection("ticketTypes")
-        .updateOne(
-          { _id: new ObjectId(item.ticketTypeId) },
-          { $inc: { soldCount: -item.quantity } },
-        );
+        .updateOne({ _id }, { $inc: { soldCount: -item.quantity } });
     } catch {
       /* best effort */
     }
@@ -37,7 +44,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
   }
 
-  const event = JSON.parse(raw) as {
+  let event: {
     id?: string;
     event: string;
     payload?: {
@@ -46,9 +53,17 @@ export async function POST(request: Request) {
       refund?: { entity?: Record<string, unknown> };
     };
   };
+  try {
+    event = JSON.parse(raw);
+  } catch {
+    return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
+  }
   const db = await getDb();
 
-  // Idempotency: one record per Razorpay event id.
+  // Idempotency: one record per Razorpay event id. Unlike the old code (which
+  // returned duplicate:true on ANY conflict and swallowed retries), only
+  // PROCESSED records short-circuit — RECEIVED/FAILED records are reprocessed
+  // so transient failures (e.g. order-write race) recover on Razorpay retry.
   if (event.id) {
     try {
       await db.collection<WebhookRecord>("razorpayWebhooks").insertOne({
@@ -57,7 +72,15 @@ export async function POST(request: Request) {
         status: "RECEIVED",
       });
     } catch {
-      return NextResponse.json({ received: true, duplicate: true });
+      const existing = event.id
+        ? await db
+            .collection<WebhookRecord>("razorpayWebhooks")
+            .findOne({ providerEventId: event.id })
+        : null;
+      if (existing?.status === "PROCESSED") {
+        return NextResponse.json({ received: true, duplicate: true });
+      }
+      // Otherwise fall through and reprocess this delivery attempt.
     }
   }
   const mark = async (status: WebhookRecord["status"]) => {
@@ -73,16 +96,25 @@ export async function POST(request: Request) {
   try {
     if (event.event === "payment.captured" || event.event === "order.paid") {
       const entity =
-        (event.payload?.payment?.entity as Record<string, unknown> | undefined) ?? {};
+        event.event === "order.paid"
+          ? ((event.payload?.order?.entity ??
+            event.payload?.payment?.entity) as Record<string, unknown> | undefined) ?? {}
+          : ((event.payload?.payment?.entity as Record<string, unknown> | undefined) ?? {});
       const paymentId = String(entity.id ?? "");
+      // order.paid payloads nest the payment id under `payments[]` in some
+      // versions — fall back to the first entry when `id` is absent.
+      const payments = Array.isArray(entity.payments) ? entity.payments : [];
+      const fallbackPaymentId =
+        !paymentId && payments.length > 0 ? String((payments[0] as Record<string, unknown>).id ?? "") : "";
+      const resolvedPaymentId = paymentId || fallbackPaymentId;
       const rzpOrderId = String(entity.order_id ?? "");
-      if (!paymentId || !rzpOrderId) {
+      if (!resolvedPaymentId || !rzpOrderId) {
         await mark("FAILED");
         return NextResponse.json({ error: "Bad payload" }, { status: 400 });
       }
 
       // Re-verify against Razorpay API; never trust the webhook amount.
-      const payment = await fetchPayment(paymentId);
+      const payment = await fetchPayment(resolvedPaymentId);
       if (!payment.captured || payment.order_id !== rzpOrderId) {
         await mark("FAILED");
         return NextResponse.json({ error: "Payment not captured" }, { status: 400 });
@@ -90,12 +122,19 @@ export async function POST(request: Request) {
 
       const order = await db.collection<Order>("orders").findOne({ razorpayOrderId: rzpOrderId });
       if (!order) {
+        // Retryable: the order write may still be in flight. Return 500 (not
+        // 200-duplicate) so Razorpay redelivers; the RECEIVED record stays and
+        // the next attempt reprocesses instead of short-circuiting.
         await mark("FAILED");
-        return NextResponse.json({ error: "Unknown order" }, { status: 404 });
+        return NextResponse.json({ error: "Unknown order — retrying" }, { status: 500 });
       }
       if (order.status === "PAID") {
         await mark("PROCESSED");
         return NextResponse.json({ received: true, duplicate: true });
+      }
+      if (order.status !== "CREATED") {
+        await mark("PROCESSED");
+        return NextResponse.json({ received: true });
       }
       if (payment.amount !== order.totalPaise || payment.currency !== order.currency) {
         await db
@@ -106,97 +145,58 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "Amount mismatch" }, { status: 400 });
       }
 
-      // Fulfill: mark paid, create tickets, queue emails.
+      // Validate all ids BEFORE mutating the order so a malformed order can
+      // never be left PAID with zero tickets (the old ObjectId throw did that).
+      const eventOid = oid(order.eventId);
+      const orgOid = oid(order.organizationId);
+      if (!eventOid) {
+        await db
+          .collection("orders")
+          .updateOne({ _id: order._id }, { $set: { status: "FAILED" } });
+        await releaseHold(db, order.items);
+        await mark("FAILED");
+        return NextResponse.json({ error: "Corrupt order" }, { status: 400 });
+      }
+      const eventDoc = await db.collection<Event>("events").findOne({ _id: eventOid });
+
+      // Fulfill: mark paid, create tickets (idempotent), queue emails.
       await db.collection("orders").updateOne(
         { _id: order._id },
-        { $set: { status: "PAID", razorpayPaymentId: paymentId, paidAt: new Date() } },
+        { $set: { status: "PAID", razorpayPaymentId: resolvedPaymentId, paidAt: new Date() } },
       );
 
-      const ev = await db.collection<Event>("events").findOne({ _id: order.eventId as never });
-      void ev;
-      const { ObjectId: OID } = await import("mongodb");
-      const eventDoc = await db
-        .collection<Event>("events")
-        .findOne({ _id: new OID(order.eventId) });
-      // Attendee pool per ticket type (fallback: buyer details).
-      const pools = new Map<string, { name: string; email: string }[]>();
-      for (const a of order.attendees ?? []) {
-        const list = pools.get(a.ticketTypeId) ?? [];
-        list.push({ name: a.name, email: a.email });
-        pools.set(a.ticketTypeId, list);
-      }
-      const tickets: Ticket[] = [];
-      for (const item of order.items) {
-        const pool = pools.get(item.ticketTypeId) ?? [];
-        for (let i = 0; i < item.quantity; i++) {
-          const attendee = pool[i] ?? { name: order.buyerName, email: order.buyerEmail };
-          const code = makeTicketCode();
-          tickets.push({
-            orderId: order._id!.toString(),
-            eventId: order.eventId,
-            ticketTypeId: item.ticketTypeId,
-            attendeeName: attendee.name,
-            attendeeEmail: attendee.email,
-            code,
-            qrPayload: signTicket(code),
-            status: "VALID",
-            checkedInAt: null,
-          });
-        }
-      }
-      const inserted =
-        tickets.length > 0
-          ? await db.collection<Ticket>("tickets").insertMany(tickets)
-          : null;
-
-      const emailDocs: EmailRecord[] = [];
-      if (inserted) {
-        const ids = Object.values(inserted.insertedIds);
-        const qrCache = new Map<string, string | null>();
-        for (let i = 0; i < tickets.length; i++) {
-          const t = tickets[i];
-          if (!qrCache.has(t.qrPayload)) qrCache.set(t.qrPayload, await ticketQrSvg(t.qrPayload));
-          emailDocs.push({
-            orderId: order._id!.toString(),
-            ticketId: ids[i]?.toString() ?? null,
-            recipient: t.attendeeEmail,
-            kind: "TICKET",
-            status: "QUEUED",
-            attempts: 0,
-            lastError: null,
-            meta: {
-              eventTitle: eventDoc?.title ?? "Your event",
-              eventVenue: eventDoc?.venue ?? "",
-              eventStartsAt: eventDoc?.startsAt?.toISOString() ?? "",
-              attendeeName: t.attendeeName,
-              ticketCode: t.code,
-              qrSvg: qrCache.get(t.qrPayload) ?? null,
-            },
-          });
-        }
-        await db.collection("emailDeliveries").insertMany(emailDocs);
+      try {
+        await fulfillOrderTickets({ ...order, _id: order._id }, eventDoc);
+      } catch (err) {
+        // Tickets failed but payment is real: keep PAID (never auto-release a
+        // captured payment's inventory) and let the next redelivery / cron
+        // backfill. fulfillOrderTickets is idempotent via orderId check.
+        console.error("[webhook] fulfillment failed, will retry", err);
+        await mark("FAILED");
+        return NextResponse.json({ error: "Fulfillment failed — retrying" }, { status: 500 });
       }
 
       // Automatic organizer settlement (non-fatal to fulfillment).
       try {
-        const { ObjectId: OrgOID } = await import("mongodb");
-        const orgDoc = await db
-          .collection<{ razorpayAccountId?: string }>("organizations")
-          .findOne({ _id: new OrgOID(order.organizationId) });
-        if (orgDoc?.razorpayAccountId && order.organizerAmountPaise > 0) {
-          const transfer = await createOrganizerTransfer({
-            account: orgDoc.razorpayAccountId,
-            amountPaise: order.organizerAmountPaise,
-            notes: {
-              orderId: order._id!.toString(),
-              eventId: order.eventId,
-              organizationId: order.organizationId,
-            },
-          });
-          await db.collection("orders").updateOne(
-            { _id: order._id },
-            { $set: { transferId: transfer.id, transferStatus: transfer.status } },
-          );
+        if (orgOid) {
+          const orgDoc = await db
+            .collection<{ razorpayAccountId?: string }>("organizations")
+            .findOne({ _id: orgOid });
+          if (orgDoc?.razorpayAccountId && order.organizerAmountPaise > 0) {
+            const transfer = await createOrganizerTransfer({
+              account: orgDoc.razorpayAccountId,
+              amountPaise: order.organizerAmountPaise,
+              notes: {
+                orderId: order._id!.toString(),
+                eventId: order.eventId,
+                organizationId: order.organizationId,
+              },
+            });
+            await db.collection("orders").updateOne(
+              { _id: order._id },
+              { $set: { transferId: transfer.id, transferStatus: transfer.status } },
+            );
+          }
         }
       } catch (err) {
         console.error("[webhook] transfer failed", err);

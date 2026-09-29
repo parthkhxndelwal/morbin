@@ -48,9 +48,19 @@ export async function POST(request: Request) {
   if (ticket.status !== "VALID")
     return NextResponse.json({ error: `Ticket is ${ticket.status}` }, { status: 400 });
 
-  await db
-    .collection("tickets")
-    .updateOne({ _id: ticket._id }, { $set: { status: "USED", checkedInAt: new Date() } });
+  // Atomic burn: only one concurrent scan can flip VALID -> USED.
+  const burned = await db.collection<Ticket>("tickets").findOneAndUpdate(
+    { _id: ticket._id, status: "VALID" },
+    { $set: { status: "USED", checkedInAt: new Date() } },
+    { returnDocument: "after" },
+  );
+  if (!burned) {
+    const current = await db.collection<Ticket>("tickets").findOne({ _id: ticket._id });
+    return NextResponse.json(
+      { ok: false, error: "Already checked in", checkedInAt: current?.checkedInAt ?? null },
+      { status: 409 },
+    );
+  }
   return NextResponse.json({
     ok: true,
     attendeeName: ticket.attendeeName,

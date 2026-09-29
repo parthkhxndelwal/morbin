@@ -7,9 +7,9 @@ import { NewEventForm } from "./new-event-form";
 
 export default async function EventsPage() {
   const session = await auth();
-  if (!session?.user?.id) redirect("/login");
+  if (!session?.user?.id) redirect("/auth");
   const org = await getOrgByOwner(session.user.id);
-  if (!org || !org._id) redirect("/onboarding");
+  if (!org || !org._id) redirect("/auth");
   const events = await getOrgEvents(org._id.toString());
 
   return (
@@ -48,13 +48,13 @@ export default async function EventsPage() {
                   </span>
                 </div>
                 <p className="mt-1 text-sm text-neutral-400">
-                  {e.venue} · {new Date(e.startsAt).toLocaleDateString("en-IN")}
+                  {e.venue} ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â· {new Date(e.startsAt).toLocaleDateString("en-IN")}
                 </p>
               </Link>
             ))}
             {events.length === 0 && (
               <p className="rounded-2xl border border-white/10 p-6 text-center text-sm text-neutral-500">
-                No events yet — create your first draft.
+                No events yet ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â create your first draft.
               </p>
             )}
           </div>

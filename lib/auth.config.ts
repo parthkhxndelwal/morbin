@@ -6,8 +6,8 @@ import type { NextAuthConfig } from "next-auth";
  */
 export const authConfig = {
   pages: {
-    signIn: "/login",
-    error: "/login",
+    signIn: "/auth",
+    error: "/auth",
   },
   providers: [],
   callbacks: {
@@ -15,18 +15,15 @@ export const authConfig = {
       const { pathname } = request.nextUrl;
       const isLoggedIn = !!auth?.user;
 
-      if (
-        pathname.startsWith("/dashboard") ||
-        pathname.startsWith("/onboarding") ||
-        pathname === "/get-started"
-      ) {
+      // /dashboard needs a session. Role checks (admin vs org member) and the
+      // "already signed in" bounce live in the layouts, not here — proxy is a UX
+      // redirect, never the security gate.
+      if (pathname.startsWith("/dashboard")) {
         return isLoggedIn;
       }
 
-      if (isLoggedIn && (pathname === "/login" || pathname === "/register")) {
-        return Response.redirect(new URL("/onboarding", request.nextUrl));
-      }
-
+      // /auth stays reachable both signed out (renders the sign-in form) and
+      // signed in (dispatches onward), so it is never gated here.
       return true;
     },
     async jwt({ token, user, trigger, session }) {

@@ -30,22 +30,40 @@ async function rzp(path: string, init?: RequestInit) {
 export async function createLinkedAccount({
   name,
   email,
+  orgId,
 }: {
   name: string;
   email: string;
+  orgId?: string;
 }): Promise<string> {
-  const body = await rzp("/accounts", {
-    method: "POST",
-    body: JSON.stringify({
-      email,
-      phone: "9000090000",
-      type: "route",
-      reference_id: `org-${Date.now()}`,
-      legal_business_name: name,
-      business_type: "individual",
-      contact_name: name,
-    }),
-  });
+  let body: Record<string, unknown>;
+  try {
+    body = await rzp("/accounts", {
+      method: "POST",
+      body: JSON.stringify({
+        email,
+        phone: process.env.RAZORPAY_ACCOUNT_PHONE ?? "9000090000",
+        type: "route",
+        reference_id: `org-${orgId ?? Date.now()}-${Date.now()}`,
+        legal_business_name: name,
+        business_type: "individual",
+        contact_name: name,
+      }),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    // The common case: standard Razorpay keys without the Route product. The
+    // raw "URL not found / BAD_REQUEST_ERROR" is unactionable, so translate it.
+    if (message.includes("/accounts") && (message.includes("400") || message.includes("404"))) {
+      throw new Error(
+        "Razorpay Route is not enabled for these API keys (POST /v1/accounts failed). " +
+          "Enable Route in the Razorpay dashboard, use keys from a Route-enabled account, " +
+          "or verify the organizer manually. Original: " +
+          message.slice(0, 200),
+      );
+    }
+    throw error;
+  }
   if (typeof body.id !== "string") throw new Error("Razorpay did not return an account id");
   return body.id;
 }

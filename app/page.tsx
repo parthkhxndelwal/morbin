@@ -39,13 +39,13 @@ export default function Home() {
           mouseStrength={0}
         />
       </div>
-      {/* legibility halo — keeps centered text readable over the tunnel */}
+      {/* legibility halo Ã¢â‚¬â€ keeps centered text readable over the tunnel */}
       <div
         aria-hidden
         className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_65%_60%_at_50%_45%,rgba(6,6,20,0.78),transparent)]"
       />
 
-      {/* logo only — no nav */}
+      {/* logo only Ã¢â‚¬â€ no nav */}
       <header className="relative z-10 mx-auto w-full max-w-7xl shrink-0 px-6 pt-5 sm:px-10 sm:pt-7">
         <span className="text-base font-extrabold lowercase tracking-tight sm:text-lg">morbin</span>
       </header>
@@ -55,7 +55,7 @@ export default function Home() {
           <HeroTitle />
           <p className="mt-4 max-w-md text-[clamp(0.9rem,2.5vw,1.125rem)] leading-relaxed text-neutral-400 [@media(max-height:700px)]:mt-2 [@media(max-height:700px)]:hidden sm:[@media(max-height:700px)]:block">
             We&apos;re building something new for people who bring people
-            together. Morbin is in stealth — join the list to get in early.
+            together. Morbin is in stealth Ã¢â‚¬â€ join the list to get in early.
           </p>
           <div className="mt-6 w-full max-w-md [@media(max-height:700px)]:mt-4">
             <EarlyAccessForm compact />
@@ -64,12 +64,12 @@ export default function Home() {
       </main>
 
       <footer className="relative z-10 mx-auto flex w-full max-w-7xl shrink-0 flex-col gap-1.5 px-6 pb-5 text-xs text-neutral-500 sm:flex-row sm:items-center sm:justify-between sm:px-10 sm:pb-7">
-        <p>© 2026 Morbin. All rights reserved.</p>
+        <p>Ã‚Â© 2026 Morbin. All rights reserved.</p>
         <div className="flex gap-5">
-          <Link href="/privacy" className="transition-colors hover:text-neutral-300">
+          <Link href="/legal/privacy" className="transition-colors hover:text-neutral-300">
             Privacy Policy
           </Link>
-          <Link href="/terms" className="transition-colors hover:text-neutral-300">
+          <Link href="/legal/terms" className="transition-colors hover:text-neutral-300">
             Terms &amp; Conditions
           </Link>
         </div>

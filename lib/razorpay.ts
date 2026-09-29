@@ -1,4 +1,4 @@
-import { createHmac } from "node:crypto";
+import { createHmac, timingSafeEqual } from "node:crypto";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type RzpInstance = any;
@@ -73,7 +73,14 @@ export function verifyWebhookSignature(
 ): boolean {
   if (!secret || !signature) return false;
   const expected = createHmac("sha256", secret).update(rawBody).digest("hex");
-  return expected === signature;
+  const a = Buffer.from(expected, "utf8");
+  const b = Buffer.from(signature, "utf8");
+  if (a.length !== b.length) return false;
+  try {
+    return timingSafeEqual(a, b);
+  } catch {
+    return false;
+  }
 }
 
 /** Create a Route transfer of captured funds to the organizer's linked account. */

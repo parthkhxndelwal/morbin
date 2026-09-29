@@ -1,7 +1,7 @@
 import { MongoDBAdapter } from "@auth/mongodb-adapter";
 import bcrypt from "bcryptjs";
 import { ObjectId } from "mongodb";
-import NextAuth, { type DefaultSession } from "next-auth";
+import NextAuth, { type DefaultSession, CredentialsSignin } from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import Google from "next-auth/providers/google";
 import { authConfig } from "@/lib/auth.config";
@@ -26,6 +26,10 @@ declare module "next-auth" {
     onboardingStatus?: string | null;
     paymentAccountStatus?: string | null;
   }
+}
+
+export class EmailNotVerifiedError extends CredentialsSignin {
+  code = "EMAIL_NOT_VERIFIED";
 }
 
 async function getOrgContext(userId: string) {
@@ -92,7 +96,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         if (!user?.passwordHash) return null;
         const valid = await bcrypt.compare(parsed.data.password, user.passwordHash);
         if (!valid) return null;
-        if (!user.emailVerified) throw new Error("EMAIL_NOT_VERIFIED");
+        if (!user.emailVerified) throw new EmailNotVerifiedError();
         const ctx = await getOrgContext(user._id.toString());
         return {
           id: user._id.toString(),

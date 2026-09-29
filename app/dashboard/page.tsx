@@ -8,15 +8,32 @@ import type { Order } from "@/lib/types";
 
 export default async function DashboardPage() {
   const session = await auth();
-  if (!session?.user?.id) redirect("/login");
+  if (!session?.user?.id) redirect("/auth");
   const org = await getOrgByOwner(session.user.id);
-  if (!org || !org._id) redirect("/onboarding");
+  if (!org || !org._id) redirect("/auth");
   const orgId = org._id.toString();
 
   const db = await getDb();
-  const [events, paidOrders, recentOrders] = await Promise.all([
+  const [events, stats, recentOrders] = await Promise.all([
     getOrgEvents(orgId),
-    db.collection<Order>("orders").find({ organizationId: orgId, status: "PAID" }).toArray(),
+    db
+      .collection<Order>("orders")
+      .aggregate<{
+        revenue: number;
+        ticketsSold: number;
+        count: number;
+      }>([
+        { $match: { organizationId: orgId, status: "PAID" } },
+        {
+          $group: {
+            _id: null,
+            revenue: { $sum: "$totalPaise" },
+            ticketsSold: { $sum: { $sum: "$items.quantity" } },
+            count: { $sum: 1 },
+          },
+        },
+      ])
+      .toArray(),
     db
       .collection<Order>("orders")
       .find({ organizationId: orgId, status: "PAID" })
@@ -24,11 +41,8 @@ export default async function DashboardPage() {
       .limit(8)
       .toArray(),
   ]);
-  const revenue = paidOrders.reduce((s, o) => s + o.totalPaise, 0);
-  const ticketsSold = paidOrders.reduce(
-    (s, o) => s + o.items.reduce((a, i) => a + i.quantity, 0),
-    0,
-  );
+  const revenue = stats[0]?.revenue ?? 0;
+  const ticketsSold = stats[0]?.ticketsSold ?? 0;
 
   return (
     <div>
@@ -44,16 +58,16 @@ export default async function DashboardPage() {
         </span>
         {org.paymentAccountStatus !== "VERIFIED" && (
           <>
-            {" · "}
-            <Link href="/onboarding" className="underline">
-              Finish verification
-            </Link>
+            {" ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â· "}
+            <span className="text-neutral-500">
+              awaiting approval ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â paid events unlock once you&apos;re verified
+            </span>
           </>
         )}
       </p>
       <div className="mt-6 grid gap-4 sm:grid-cols-3">
         {[
-          ["Revenue", `₹${(revenue / 100).toFixed(0)}`],
+          ["Revenue", `ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¹${(revenue / 100).toFixed(0)}`],
           ["Tickets sold", String(ticketsSold)],
           ["Events", String(events.length)],
         ].map(([label, value]) => (
@@ -71,7 +85,7 @@ export default async function DashboardPage() {
           Manage events
         </Link>
         <Link
-          href="/verify"
+          href="/dashboard/scan"
           className="rounded-full border border-white/15 px-5 py-2.5 text-sm font-semibold hover:bg-white/10"
         >
           Check-in desk
@@ -97,8 +111,8 @@ export default async function DashboardPage() {
                 <td className="px-4 py-3 text-neutral-400">
                   {o.items.reduce((s, i) => s + i.quantity, 0)}
                 </td>
-                <td className="px-4 py-3">₹{(o.totalPaise / 100).toFixed(0)}</td>
-                <td className="px-4 py-3 text-neutral-400">{o.transferStatus ?? "—"}</td>
+                <td className="px-4 py-3">ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¹{(o.totalPaise / 100).toFixed(0)}</td>
+                <td className="px-4 py-3 text-neutral-400">{o.transferStatus ?? "ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â"}</td>
               </tr>
             ))}
             {recentOrders.length === 0 && (

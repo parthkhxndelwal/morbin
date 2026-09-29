@@ -8,8 +8,8 @@ const schema = z.object({ email: z.string().email() });
 
 /** Buyer ticket lookup (no login): paid tickets for an email address. */
 export async function GET(request: Request) {
-  const email = new URL(request.url).searchParams.get("email") ?? "";
-  const parsed = schema.safeParse({ email: email.toLowerCase() });
+  const raw = new URL(request.url).searchParams.get("email") ?? "";
+  const parsed = schema.safeParse({ email: raw.trim().toLowerCase() });
   if (!parsed.success)
     return NextResponse.json({ error: "Invalid email" }, { status: 400 });
   const db = await getDb();

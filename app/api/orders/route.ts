@@ -2,6 +2,8 @@ import { ObjectId } from "mongodb";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getDb } from "@/lib/db";
+import { fulfillOrderTickets } from "@/lib/fulfillment";
+import { expireStaleOrders } from "@/lib/orders";
 import { createTicketOrder } from "@/lib/razorpay";
 import type { Event, Order, TicketType } from "@/lib/types";
 
@@ -46,6 +48,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid order" }, { status: 400 });
 
   const db = await getDb();
+
+  // Opportunistic cleanup so abandoned CREATED holds don't phantom-sell-out.
+  try {
+    await expireStaleOrders();
+  } catch {
+    /* non-fatal */
+  }
+
   const eventOid = oid(parsed.data.eventId);
   if (!eventOid) return NextResponse.json({ error: "Invalid event" }, { status: 400 });
 
@@ -57,8 +67,21 @@ export async function POST(request: Request) {
   if (event.endsAt < now)
     return NextResponse.json({ error: "Event has ended" }, { status: 400 });
 
+  // Merge duplicate ticketTypeId lines so inventory holds stay accurate.
+  const merged = new Map<string, number>();
+  for (const item of parsed.data.items) {
+    merged.set(item.ticketTypeId, (merged.get(item.ticketTypeId) ?? 0) + item.quantity);
+  }
+  for (const [, qty] of merged) {
+    if (qty > 10)
+      return NextResponse.json(
+        { error: "Maximum 10 tickets per type per order" },
+        { status: 400 },
+      );
+  }
+
   // Load + validate ticket types
-  const typeIds = [...new Set(parsed.data.items.map((i) => i.ticketTypeId))];
+  const typeIds = [...merged.keys()];
   const typeOids = typeIds.map(oid);
   if (typeOids.some((o) => !o))
     return NextResponse.json({ error: "Invalid ticket type" }, { status: 400 });
@@ -71,23 +94,23 @@ export async function POST(request: Request) {
 
   let subtotal = 0;
   const orderItems = [];
-  for (const item of parsed.data.items) {
-    const t = byId.get(item.ticketTypeId);
+  for (const [ticketTypeId, quantity] of merged) {
+    const t = byId.get(ticketTypeId);
     if (!t || t.eventId !== event._id!.toString())
       return NextResponse.json({ error: "Invalid ticket type" }, { status: 400 });
     if (t.saleStartsAt && t.saleStartsAt > now)
       return NextResponse.json({ error: `Sales not open for ${t.name}` }, { status: 400 });
     if (t.saleEndsAt && t.saleEndsAt < now)
       return NextResponse.json({ error: `Sales closed for ${t.name}` }, { status: 400 });
-    subtotal += t.pricePaise * item.quantity;
+    subtotal += t.pricePaise * quantity;
     orderItems.push({
-      ticketTypeId: item.ticketTypeId,
+      ticketTypeId,
       name: t.name,
-      quantity: item.quantity,
+      quantity,
       unitPricePaise: t.pricePaise,
     });
   }
-  if (subtotal <= 0)
+  if (subtotal < 0)
     return NextResponse.json({ error: "Invalid total" }, { status: 400 });
 
   // Validate attendees against items
@@ -106,7 +129,7 @@ export async function POST(request: Request) {
   // Atomic inventory holds
   const holds: { id: ObjectId; qty: number }[] = [];
   try {
-    for (const item of parsed.data.items) {
+    for (const item of orderItems) {
       const r = await db.collection("ticketTypes").updateOne(
         {
           _id: new ObjectId(item.ticketTypeId),
@@ -124,28 +147,90 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Sold out" }, { status: 409 });
   }
 
+  const releaseHolds = async () => {
+    for (const h of holds) {
+      try {
+        await db.collection("ticketTypes").updateOne({ _id: h.id }, { $inc: { soldCount: -h.qty } });
+      } catch {
+        /* best effort */
+      }
+    }
+  };
+
   const platformFeePaise = Math.round((subtotal * PLATFORM_FEE_BPS) / 10000);
   const totalPaise = subtotal; // buyer pays face value; fee split from organizer share
   const organizerAmountPaise = subtotal - platformFeePaise;
 
+  // Pre-generate the order id so the Razorpay receipt + placeholder are unique.
+  // (The old "" placeholder collided under the unique razorpayOrderId index.)
+  const orderOid = new ObjectId();
+  const orderIdStr = orderOid.toString();
+
+  // Free orders skip Razorpay entirely and fulfill immediately.
+  if (totalPaise === 0) {
+    const order: Order = {
+      _id: orderOid,
+      eventId: event._id!.toString(),
+      organizationId: event.organizationId,
+      buyerName: parsed.data.buyer.name.trim(),
+      buyerEmail: parsed.data.buyer.email.trim().toLowerCase(),
+      buyerPhone: parsed.data.buyer.phone.trim(),
+      items: orderItems,
+      attendees: (parsed.data.attendees ?? []).map((a) => ({
+        ticketTypeId: a.ticketTypeId,
+        name: a.name.trim(),
+        email: a.email.trim().toLowerCase(),
+      })),
+      subtotalPaise: subtotal,
+      platformFeePaise: 0,
+      organizerAmountPaise: 0,
+      totalPaise: 0,
+      currency: "INR",
+      razorpayOrderId: `free-${orderIdStr}`,
+      razorpayPaymentId: null,
+      status: "PAID",
+      createdAt: new Date(),
+      paidAt: new Date(),
+    };
+    try {
+      await db.collection<Order>("orders").insertOne(order);
+      await fulfillOrderTickets(order, event);
+      try {
+        const { flushEmailQueue } = await import("@/lib/email");
+        await flushEmailQueue(20);
+      } catch {
+        /* cron retries */
+      }
+      return NextResponse.json(
+        { orderId: orderIdStr, free: true, totalPaise: 0 },
+        { status: 201 },
+      );
+    } catch (error) {
+      await releaseHolds();
+      console.error("[orders:free]", error);
+      return NextResponse.json({ error: "Unable to create order" }, { status: 500 });
+    }
+  }
+
   const order: Order = {
+    _id: orderOid,
     eventId: event._id!.toString(),
     organizationId: event.organizationId,
     buyerName: parsed.data.buyer.name.trim(),
-    buyerEmail: parsed.data.buyer.email.toLowerCase(),
+    buyerEmail: parsed.data.buyer.email.trim().toLowerCase(),
     buyerPhone: parsed.data.buyer.phone.trim(),
     items: orderItems,
     attendees: (parsed.data.attendees ?? []).map((a) => ({
       ticketTypeId: a.ticketTypeId,
       name: a.name.trim(),
-      email: a.email.toLowerCase(),
+      email: a.email.trim().toLowerCase(),
     })),
     subtotalPaise: subtotal,
     platformFeePaise,
     organizerAmountPaise,
     totalPaise,
     currency: "INR",
-    razorpayOrderId: "",
+    razorpayOrderId: `pending-${orderIdStr}`,
     razorpayPaymentId: null,
     status: "CREATED",
     createdAt: new Date(),
@@ -153,24 +238,24 @@ export async function POST(request: Request) {
   };
 
   try {
-    const { insertedId } = await db.collection<Order>("orders").insertOne(order);
+    await db.collection<Order>("orders").insertOne(order);
     const rzpOrder = await createTicketOrder({
       amountPaise: totalPaise,
-      receipt: insertedId.toString(),
+      receipt: orderIdStr,
       notes: {
         eventId: order.eventId,
         organizationId: order.organizationId,
-        orderId: insertedId.toString(),
+        orderId: orderIdStr,
       },
     });
     await db
       .collection("orders")
-      .updateOne({ _id: insertedId }, { $set: { razorpayOrderId: rzpOrder.id } });
+      .updateOne({ _id: orderOid }, { $set: { razorpayOrderId: rzpOrder.id } });
     if (!process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID)
       throw new Error("NEXT_PUBLIC_RAZORPAY_KEY_ID is not configured");
     return NextResponse.json(
       {
-        orderId: insertedId.toString(),
+        orderId: orderIdStr,
         razorpayOrderId: rzpOrder.id,
         keyId: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
         totalPaise,
@@ -178,8 +263,12 @@ export async function POST(request: Request) {
       { status: 201 },
     );
   } catch (error) {
-    for (const h of holds) {
-      await db.collection("ticketTypes").updateOne({ _id: h.id }, { $inc: { soldCount: -h.qty } });
+    await releaseHolds();
+    // Best effort: remove the pending order so retries stay clean.
+    try {
+      await db.collection("orders").deleteOne({ _id: orderOid, status: "CREATED" });
+    } catch {
+      /* non-fatal */
     }
     console.error("[orders]", error);
     return NextResponse.json({ error: "Unable to create order" }, { status: 500 });

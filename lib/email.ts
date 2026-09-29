@@ -23,11 +23,11 @@ export async function sendEmail({
   to: string;
   subject: string;
   html: string;
-}): Promise<{ ok: boolean; id?: string }> {
+}): Promise<{ ok: boolean; id?: string; dev?: boolean }> {
   const client = sesClient();
   if (!client) {
     console.info("[email:dev] AWS SES not configured; skipping send", { to, subject });
-    return { ok: true };
+    return { ok: true, dev: true };
   }
   try {
     const out = await client.send(
@@ -126,7 +126,11 @@ export async function flushEmailQueue(limit = 20): Promise<{ sent: number; faile
       await db.collection("emailDeliveries").updateOne(
         { _id: job._id },
         {
-          $set: { status: "SENT", sentAt: new Date(), providerMessageId: r.id ?? null },
+          $set: {
+            status: "SENT",
+            sentAt: new Date(),
+            providerMessageId: r.dev ? "dev-skip" : (r.id ?? null),
+          },
           $inc: { attempts: 1 },
         },
       );
