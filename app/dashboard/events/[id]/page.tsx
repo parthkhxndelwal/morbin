@@ -50,13 +50,13 @@ export default async function EventDetailPage({
   return (
     <div>
       <Link href="/dashboard/events" className="text-sm text-neutral-400 hover:text-white">
-        Ã¢â€ Â Events
+        ← Events
       </Link>
       <div className="mt-2 flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">{event.title}</h1>
           <p className="mt-1 text-sm text-neutral-400">
-            {event.venue} Ã‚Â· Revenue Ã¢â€šÂ¹{(revenue / 100).toFixed(0)} Ã‚Â· {ticketCount} tickets
+            {event.venue} · Revenue ₹{(revenue / 100).toFixed(0)} · {ticketCount} tickets
           </p>
           {event.status === "PUBLISHED" && (
             <p className="mt-1 text-sm">
@@ -81,7 +81,7 @@ export default async function EventDetailPage({
           >
             <span className="font-semibold">{t.name}</span>
             <span className="text-neutral-400">
-              Ã¢â€šÂ¹{(t.pricePaise / 100).toFixed(0)} Ã‚Â· {t.soldCount}/{t.capacity} sold
+              ₹{(t.pricePaise / 100).toFixed(0)} · {t.soldCount}/{t.capacity} sold
             </span>
           </div>
         ))}
@@ -103,7 +103,7 @@ export default async function EventDetailPage({
       </div>
 
       <h2 className="mt-8 text-sm font-bold uppercase tracking-widest text-neutral-400">
-        Attendees ({ticketCount}{ticketCount > tickets.length ? ` Ã‚Â· showing recent ${tickets.length}` : ""})
+        Attendees ({ticketCount}{ticketCount > tickets.length ? ` · showing recent ${tickets.length}` : ""})
       </h2>
       <div className="mt-3 max-h-96 overflow-auto rounded-2xl border border-white/10">        <table className="w-full text-sm">
           <thead className="sticky top-0 bg-[#0b0b1c]">

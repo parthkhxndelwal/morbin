@@ -2,7 +2,7 @@ import Link from "next/link";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Terms & Conditions â€” Morbin",
+  title: "Terms & Conditions — Morbin",
   description: "Morbin terms and conditions.",
 };
 
@@ -25,7 +25,7 @@ const sections = [
   },
   {
     h: "5. No warranties",
-    p: "This site is provided â€œas isâ€ without warranties of any kind. To the maximum extent permitted by law, we disclaim all implied warranties, including merchantability and fitness for a particular purpose.",
+    p: "This site is provided “as is” without warranties of any kind. To the maximum extent permitted by law, we disclaim all implied warranties, including merchantability and fitness for a particular purpose.",
   },
   {
     h: "6. Limitation of liability",

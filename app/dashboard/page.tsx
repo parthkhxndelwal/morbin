@@ -58,16 +58,16 @@ export default async function DashboardPage() {
         </span>
         {org.paymentAccountStatus !== "VERIFIED" && (
           <>
-            {" ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â· "}
+            {" · "}
             <span className="text-neutral-500">
-              awaiting approval ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â paid events unlock once you&apos;re verified
+              awaiting approval — paid events unlock once you&apos;re verified
             </span>
           </>
         )}
       </p>
       <div className="mt-6 grid gap-4 sm:grid-cols-3">
         {[
-          ["Revenue", `ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¹${(revenue / 100).toFixed(0)}`],
+          ["Revenue", `₹${(revenue / 100).toFixed(0)}`],
           ["Tickets sold", String(ticketsSold)],
           ["Events", String(events.length)],
         ].map(([label, value]) => (
@@ -111,8 +111,8 @@ export default async function DashboardPage() {
                 <td className="px-4 py-3 text-neutral-400">
                   {o.items.reduce((s, i) => s + i.quantity, 0)}
                 </td>
-                <td className="px-4 py-3">ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¹{(o.totalPaise / 100).toFixed(0)}</td>
-                <td className="px-4 py-3 text-neutral-400">{o.transferStatus ?? "ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â"}</td>
+                <td className="px-4 py-3">₹{(o.totalPaise / 100).toFixed(0)}</td>
+                <td className="px-4 py-3 text-neutral-400">{o.transferStatus ?? "—"}</td>
               </tr>
             ))}
             {recentOrders.length === 0 && (

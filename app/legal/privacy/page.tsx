@@ -2,7 +2,7 @@ import Link from "next/link";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Privacy Policy â€” Morbin",
+  title: "Privacy Policy — Morbin",
   description: "How Morbin collects and uses personal information.",
 };
 
