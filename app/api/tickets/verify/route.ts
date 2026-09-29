@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { getDb } from "@/lib/db";
-import { verifyTicketPayload } from "@/lib/tickets";
+import { normaliseTicketCode, verifyTicketPayload } from "@/lib/tickets";
 import type { Event, Ticket } from "@/lib/types";
 
 const schema = z.object({ input: z.string().min(1).max(200) });
@@ -15,10 +15,13 @@ export async function POST(request: Request) {
   const parsed = schema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "Invalid input" }, { status: 400 });
 
-  const raw = parsed.data.input.trim().toUpperCase();
-  const code = raw.includes(".")
-    ? verifyTicketPayload(raw.toLowerCase())
-    : raw;
+  // Accepts either a bare code ("MRB-1A2B3C4D") or a full signed QR payload
+  // ("MRB-1A2B3C4D.<sig>"). Verification normalises the code to the form it
+  // was signed with, so casing in the scanned text does not matter.
+  const input = parsed.data.input.trim();
+  const code = input.includes(".")
+    ? verifyTicketPayload(input)
+    : normaliseTicketCode(input);
   if (!code) return NextResponse.json({ error: "Invalid ticket" }, { status: 404 });
 
   const db = await getDb();

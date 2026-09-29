@@ -1,7 +1,16 @@
-import { createHmac, randomBytes } from "node:crypto";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 export function makeTicketCode(): string {
   return `MRB-${randomBytes(4).toString("hex").toUpperCase()}`;
+}
+
+/**
+ * Canonical form of a ticket code — the exact form makeTicketCode emits and
+ * therefore the only form the signature is computed over. Codes are always
+ * uppercase, so a scanner or a pasted QR payload in any case still verifies.
+ */
+export function normaliseTicketCode(code: string): string {
+  return code.trim().toUpperCase();
 }
 
 function ticketSecret(): string {
@@ -12,18 +21,22 @@ function ticketSecret(): string {
 
 /** Signed QR payload: code.signature */
 export function signTicket(code: string): string {
-  const sig = createHmac("sha256", ticketSecret()).update(code).digest("hex").slice(0, 32);
-  return `${code}.${sig}`;
+  const canonical = normaliseTicketCode(code);
+  const sig = createHmac("sha256", ticketSecret()).update(canonical).digest("hex").slice(0, 32);
+  return `${canonical}.${sig}`;
 }
 
 export function verifyTicketPayload(payload: string): string | null {
-  const [code, sig] = payload.split(".");
-  if (!code || !sig) return null;
-  const expected = createHmac("sha256", ticketSecret())
-    .update(code)
-    .digest("hex")
-    .slice(0, 32);
-  return expected === sig ? code : null;
+  const [rawCode, rawSig] = payload.split(".");
+  if (!rawCode || !rawSig) return null;
+  const code = normaliseTicketCode(rawCode);
+  const expected = createHmac("sha256", ticketSecret()).update(code).digest("hex").slice(0, 32);
+  // Hex digests are case-insensitive; a scanner may hand back the payload in
+  // any case, so compare on normalised bytes in constant time.
+  const a = Buffer.from(expected, "utf8");
+  const b = Buffer.from(rawSig.trim().toLowerCase(), "utf8");
+  if (a.length !== b.length) return null;
+  return timingSafeEqual(a, b) ? code : null;
 }
 
 /** QR code as inline SVG (pure JS, Workers-safe). Falls back to null. */
