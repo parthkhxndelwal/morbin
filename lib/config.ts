@@ -21,19 +21,3 @@ export function isAdminEmail(email: string | null | undefined): boolean {
   if (!email) return false;
   return adminEmails().has(email.trim().toLowerCase());
 }
-
-export function isEmailConfigured(): boolean {
-  return Boolean(
-    process.env.AWS_REGION &&
-      process.env.AWS_ACCESS_KEY_ID &&
-      process.env.AWS_SECRET_ACCESS_KEY,
-  );
-}
-
-export function isWebhookConfigured(): boolean {
-  return Boolean(process.env.RAZORPAY_WEBHOOK_SECRET);
-}
-
-export function isCronConfigured(): boolean {
-  return Boolean(process.env.CRON_SECRET);
-}

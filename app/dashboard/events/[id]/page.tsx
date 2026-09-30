@@ -1,9 +1,8 @@
 import Link from "next/link";
-import { notFound, redirect } from "next/navigation";
-import { auth } from "@/lib/auth";
+import { notFound } from "next/navigation";
 import { getDb } from "@/lib/db";
 import { getEventById, getTicketTypes } from "@/lib/events";
-import { getOrgByOwner } from "@/lib/organizations";
+import { requireOrgSession } from "@/lib/guards";
 import type { Order, Ticket } from "@/lib/types";
 import { CheckinBox, PublishBar, TicketTypeForm } from "./controls";
 
@@ -12,12 +11,10 @@ export default async function EventDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  const session = await auth();
-  if (!session?.user?.id) redirect("/auth");
+  const { org } = await requireOrgSession();
   const { id } = await params;
-  const org = await getOrgByOwner(session.user.id);
   const event = await getEventById(id);
-  if (!event || !org?._id || event.organizationId !== org._id.toString()) notFound();
+  if (!event || event.organizationId !== org._id.toString()) notFound();
 
   const db = await getDb();
   const [types, tickets, totals] = await Promise.all([

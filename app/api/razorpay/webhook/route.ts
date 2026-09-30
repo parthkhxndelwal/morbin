@@ -1,8 +1,8 @@
-import { ObjectId } from "mongodb";
 import { NextResponse } from "next/server";
-import { getDb } from "@/lib/db";
+import { getDb, toObjectId } from "@/lib/db";
 import { flushEmailQueue } from "@/lib/email";
 import { fulfillOrderTickets } from "@/lib/fulfillment";
+import { releaseInventoryHold } from "@/lib/orders";
 import {
   createOrganizerTransfer,
   fetchPayment,
@@ -11,31 +11,6 @@ import {
 import type { Event, Order, WebhookRecord } from "@/lib/types";
 
 export const runtime = "nodejs";
-
-function oid(id: string): ObjectId | null {
-  try {
-    return new ObjectId(id);
-  } catch {
-    return null;
-  }
-}
-
-async function releaseHold(
-  db: Awaited<ReturnType<typeof getDb>>,
-  items: { ticketTypeId: string; quantity: number }[],
-) {
-  for (const item of items) {
-    try {
-      const _id = oid(item.ticketTypeId);
-      if (!_id) continue;
-      await db
-        .collection("ticketTypes")
-        .updateOne({ _id }, { $inc: { soldCount: -item.quantity } });
-    } catch {
-      /* best effort */
-    }
-  }
-}
 
 export async function POST(request: Request) {
   const raw = await request.text();
@@ -140,20 +115,20 @@ export async function POST(request: Request) {
         await db
           .collection("orders")
           .updateOne({ _id: order._id }, { $set: { status: "FAILED" } });
-        await releaseHold(db, order.items);
+        await releaseInventoryHold(db, order.items);
         await mark("FAILED");
         return NextResponse.json({ error: "Amount mismatch" }, { status: 400 });
       }
 
       // Validate all ids BEFORE mutating the order so a malformed order can
       // never be left PAID with zero tickets (the old ObjectId throw did that).
-      const eventOid = oid(order.eventId);
-      const orgOid = oid(order.organizationId);
+      const eventOid = toObjectId(order.eventId);
+      const orgOid = toObjectId(order.organizationId);
       if (!eventOid) {
         await db
           .collection("orders")
           .updateOne({ _id: order._id }, { $set: { status: "FAILED" } });
-        await releaseHold(db, order.items);
+        await releaseInventoryHold(db, order.items);
         await mark("FAILED");
         return NextResponse.json({ error: "Corrupt order" }, { status: 400 });
       }
@@ -227,7 +202,7 @@ export async function POST(request: Request) {
           await db
             .collection("orders")
             .updateOne({ _id: order._id }, { $set: { status: "FAILED" } });
-          await releaseHold(db, order.items);
+          await releaseInventoryHold(db, order.items);
         }
       }
       await mark("PROCESSED");

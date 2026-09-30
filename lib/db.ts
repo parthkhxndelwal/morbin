@@ -1,4 +1,26 @@
-import { MongoClient, type Db } from "mongodb";
+import { MongoClient, ObjectId, type Db } from "mongodb";
+
+/**
+ * Parse a stored id string into an ObjectId, or null when it is malformed.
+ *
+ * Collections store `_id` as an ObjectId but reference it from other documents
+ * as a string, so this conversion sits on nearly every read path. Use
+ * `toObjectId` where a bad id is data corruption to be tolerated; throw
+ * `AdminError` at the boundary where a bad id is a client error.
+ */
+export function toObjectId(id: string): ObjectId | null {
+  return ObjectId.isValid(id) ? new ObjectId(id) : null;
+}
+
+/** As `toObjectId`, but for a list — unusable ids are skipped, not fatal. */
+export function safeObjectIds(ids: readonly string[]): ObjectId[] {
+  const out: ObjectId[] = [];
+  for (const id of ids) {
+    const oid = toObjectId(id);
+    if (oid) out.push(oid);
+  }
+  return out;
+}
 
 const uri = process.env.MONGODB_URI ?? "";
 const dbName = process.env.MORBIN_DB ?? "morbin";

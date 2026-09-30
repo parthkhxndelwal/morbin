@@ -1,15 +1,10 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
-import { auth } from "@/lib/auth";
 import { getOrgEvents } from "@/lib/events";
-import { getOrgByOwner } from "@/lib/organizations";
+import { requireOrgSession } from "@/lib/guards";
 import { NewEventForm } from "./new-event-form";
 
 export default async function EventsPage() {
-  const session = await auth();
-  if (!session?.user?.id) redirect("/auth");
-  const org = await getOrgByOwner(session.user.id);
-  if (!org || !org._id) redirect("/auth");
+  const { org } = await requireOrgSession();
   const events = await getOrgEvents(org._id.toString());
 
   return (

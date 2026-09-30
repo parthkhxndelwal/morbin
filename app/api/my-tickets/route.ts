@@ -1,7 +1,6 @@
-import { ObjectId } from "mongodb";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getDb } from "@/lib/db";
+import { getDb, safeObjectIds } from "@/lib/db";
 import type { Event, Ticket } from "@/lib/types";
 
 const schema = z.object({ email: z.string().email() });
@@ -20,15 +19,7 @@ export async function GET(request: Request) {
     .limit(50)
     .toArray();
   const eventIds = [...new Set(tickets.map((t) => t.eventId))];
-  const oids = eventIds
-    .map((id) => {
-      try {
-        return new ObjectId(id);
-      } catch {
-        return null;
-      }
-    })
-    .filter((o): o is ObjectId => o !== null);
+  const oids = safeObjectIds(eventIds);
   const events = await db
     .collection<Event>("events")
     .find({ _id: { $in: oids } })

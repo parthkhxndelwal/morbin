@@ -1,7 +1,7 @@
 import { ObjectId } from "mongodb";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getDb } from "@/lib/db";
+import { getDb, toObjectId } from "@/lib/db";
 import { fulfillOrderTickets } from "@/lib/fulfillment";
 import { expireStaleOrders } from "@/lib/orders";
 import { createTicketOrder } from "@/lib/razorpay";
@@ -34,14 +34,6 @@ const schema = z.object({
     .optional(),
 });
 
-function oid(id: string): ObjectId | null {
-  try {
-    return new ObjectId(id);
-  } catch {
-    return null;
-  }
-}
-
 export async function POST(request: Request) {
   const parsed = schema.safeParse(await request.json().catch(() => null));
   if (!parsed.success)
@@ -56,7 +48,7 @@ export async function POST(request: Request) {
     /* non-fatal */
   }
 
-  const eventOid = oid(parsed.data.eventId);
+  const eventOid = toObjectId(parsed.data.eventId);
   if (!eventOid) return NextResponse.json({ error: "Invalid event" }, { status: 400 });
 
   const event = await db.collection<Event>("events").findOne({ _id: eventOid });
@@ -82,7 +74,7 @@ export async function POST(request: Request) {
 
   // Load + validate ticket types
   const typeIds = [...merged.keys()];
-  const typeOids = typeIds.map(oid);
+  const typeOids = typeIds.map(toObjectId);
   if (typeOids.some((o) => !o))
     return NextResponse.json({ error: "Invalid ticket type" }, { status: 400 });
   const validOids = typeOids.filter((o): o is ObjectId => o !== null);

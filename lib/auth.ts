@@ -1,11 +1,10 @@
 import { MongoDBAdapter } from "@auth/mongodb-adapter";
 import bcrypt from "bcryptjs";
-import { ObjectId } from "mongodb";
 import NextAuth, { type DefaultSession, CredentialsSignin } from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import Google from "next-auth/providers/google";
 import { authConfig } from "@/lib/auth.config";
-import { getClientPromise, getDb } from "@/lib/db";
+import { getClientPromise, getDb, toObjectId } from "@/lib/db";
 import { loginSchema } from "@/lib/validations";
 import type { Membership, Organization } from "@/lib/types";
 
@@ -40,13 +39,10 @@ async function getOrgContext(userId: string) {
   // Resolve the organization: prefer the earliest membership, fall back to owned org.
   let organization: Organization | null = null;
   if (membership) {
-    try {
-      organization = await db
-        .collection<Organization>("organizations")
-        .findOne({ _id: new ObjectId(membership.organizationId) });
-    } catch {
-      organization = null;
-    }
+    const _id = toObjectId(membership.organizationId);
+    organization = _id
+      ? await db.collection<Organization>("organizations").findOne({ _id })
+      : null;
   }
   if (!organization) {
     organization = await db

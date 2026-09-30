@@ -9,6 +9,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
   if (!session?.user?.id) redirect("/auth");
 
   // Admins may not own an organization themselves; they reach /dashboard/admin.
+  // The hop itself lives in requireOrgSession (called by the pages), not here:
+  // this layout also wraps /dashboard/admin, so redirecting from it would loop.
   const isAdmin = isAdminEmail(session.user.email);
   const org = isAdmin ? null : await getOrgByOwner(session.user.id);
   if (!isAdmin && !org) redirect("/auth");

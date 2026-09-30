@@ -2,7 +2,7 @@ import { ObjectId } from "mongodb";
 import bcrypt from "bcryptjs";
 import { auth } from "@/lib/auth";
 import { isAdminEmail } from "@/lib/config";
-import { getDb } from "@/lib/db";
+import { getDb, safeObjectIds, toObjectId } from "@/lib/db";
 import { slugify } from "@/lib/slug";
 import type { OnboardingStatus, Organization, PaymentAccountStatus } from "@/lib/types";
 
@@ -29,20 +29,11 @@ export async function requireAdmin(): Promise<{ id: string; email: string }> {
   return { id, email };
 }
 
-function oid(id: string): ObjectId {
-  if (!ObjectId.isValid(id)) throw new AdminError("Invalid organization", 400);
-  return new ObjectId(id);
-}
-
-/** Non-throwing variant for read paths — a corrupt id skips the row. */
-function safeOids(ids: string[]): ObjectId[] {
-  return ids.flatMap((id) => {
-    try {
-      return [new ObjectId(id)];
-    } catch {
-      return [];
-    }
-  });
+/** Throwing variant for client-supplied ids — a bad id is a 400, not a skip. */
+function requireObjectId(id: string): ObjectId {
+  const _id = toObjectId(id);
+  if (!_id) throw new AdminError("Invalid organization", 400);
+  return _id;
 }
 
 /** Derive the flags that must stay consistent with the payment status. */
@@ -87,7 +78,7 @@ export async function listOrganizations(): Promise<AdminOrgRow[]> {
     .toArray();
 
   const ownerIds = [...new Set(orgs.map((o) => o.ownerId).filter(Boolean))];
-  const ownerOids = safeOids(ownerIds);
+  const ownerOids = safeObjectIds(ownerIds);
   const owners = ownerOids.length
     ? await db
         .collection<{ _id: ObjectId; name?: string; email: string }>("users")
@@ -237,7 +228,7 @@ export async function updateOrganizationAsAdmin(
   input: UpdateOrgInput,
 ): Promise<Organization> {
   const db = await getDb();
-  const _id = oid(id);
+  const _id = requireObjectId(id);
   const existing = await db.collection<Organization>("organizations").findOne({ _id });
   if (!existing) throw new AdminError("Organization not found", 404);
 

@@ -1,20 +1,12 @@
-import { ObjectId } from "mongodb";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
-import { getDb } from "@/lib/db";
+import { getDb, toObjectId } from "@/lib/db";
+import { releaseInventoryHold } from "@/lib/orders";
 import { refundPayment } from "@/lib/razorpay";
 import type { Order, Ticket } from "@/lib/types";
 
 const schema = z.object({ orderId: z.string().min(1) });
-
-function oid(id: string): ObjectId | null {
-  try {
-    return new ObjectId(id);
-  } catch {
-    return null;
-  }
-}
 
 /** Owner-only full refund: reverses transfer, refunds payment, voids tickets. */
 export async function POST(request: Request) {
@@ -24,7 +16,7 @@ export async function POST(request: Request) {
   const parsed = schema.safeParse(await request.json().catch(() => null));
   if (!parsed.success)
     return NextResponse.json({ error: "Invalid order" }, { status: 400 });
-  const _id = oid(parsed.data.orderId);
+  const _id = toObjectId(parsed.data.orderId);
   if (!_id) return NextResponse.json({ error: "Invalid order" }, { status: 400 });
 
   const db = await getDb();
@@ -80,18 +72,7 @@ export async function POST(request: Request) {
   await db
     .collection<Ticket>("tickets")
     .updateMany({ orderId: order._id!.toString() }, { $set: { status: "REFUNDED" } });
-  for (const item of order.items) {
-    try {
-      await db
-        .collection("ticketTypes")
-        .updateOne(
-          { _id: new ObjectId(item.ticketTypeId) },
-          { $inc: { soldCount: -item.quantity } },
-        );
-    } catch {
-      /* best effort */
-    }
-  }
+  await releaseInventoryHold(db, order.items);
   await db.collection("emailDeliveries").insertOne({
     orderId: order._id!.toString(),
     ticketId: null,

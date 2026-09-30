@@ -49,22 +49,6 @@ export async function fetchPayment(paymentId: string) {
   };
 }
 
-/** Verify checkout success signature: HMAC(orderId|paymentId). */
-export function verifyPaymentSignature({
-  orderId,
-  paymentId,
-  signature,
-}: {
-  orderId: string;
-  paymentId: string;
-  signature: string;
-}): boolean {
-  const expected = createHmac("sha256", env("RAZORPAY_KEY_SECRET"))
-    .update(`${orderId}|${paymentId}`)
-    .digest("hex");
-  return expected === signature;
-}
-
 /** Verify webhook signature over the RAW request body. */
 export function verifyWebhookSignature(
   rawBody: string,

@@ -1,15 +1,6 @@
-import { ObjectId } from "mongodb";
-import { getDb } from "@/lib/db";
+import { getDb, toObjectId } from "@/lib/db";
 import { slugify } from "@/lib/slug";
 import type { Event, EventStatus, TicketType } from "@/lib/types";
-
-function oid(id: string): ObjectId | null {
-  try {
-    return new ObjectId(id);
-  } catch {
-    return null;
-  }
-}
 
 export async function getOrgEvents(organizationId: string): Promise<Event[]> {
   const db = await getDb();
@@ -21,7 +12,7 @@ export async function getOrgEvents(organizationId: string): Promise<Event[]> {
 }
 
 export async function getEventById(id: string): Promise<Event | null> {
-  const _id = oid(id);
+  const _id = toObjectId(id);
   if (!_id) return null;
   const db = await getDb();
   return db.collection<Event>("events").findOne({ _id });
@@ -87,7 +78,7 @@ export async function updateEvent(
     status?: EventStatus;
   },
 ): Promise<boolean> {
-  const _id = oid(id);
+  const _id = toObjectId(id);
   if (!_id) return false;
   const db = await getDb();
   const r = await db.collection<Event>("events").updateOne(

@@ -1,16 +1,11 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
-import { auth } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { getOrgEvents } from "@/lib/events";
-import { getOrgByOwner } from "@/lib/organizations";
+import { requireOrgSession } from "@/lib/guards";
 import type { Order } from "@/lib/types";
 
 export default async function DashboardPage() {
-  const session = await auth();
-  if (!session?.user?.id) redirect("/auth");
-  const org = await getOrgByOwner(session.user.id);
-  if (!org || !org._id) redirect("/auth");
+  const { org } = await requireOrgSession();
   const orgId = org._id.toString();
 
   const db = await getDb();

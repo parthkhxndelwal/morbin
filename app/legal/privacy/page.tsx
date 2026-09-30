@@ -1,5 +1,5 @@
-import Link from "next/link";
 import type { Metadata } from "next";
+import { LegalFooter } from "@/components/legal-footer";
 
 export const metadata: Metadata = {
   title: "Privacy Policy — Morbin",
@@ -39,28 +39,25 @@ const sections = [
 
 export default function PrivacyPage() {
   return (
-    <div className="min-h-screen bg-[#060614] font-sans text-neutral-300 antialiased">
-      <div className="mx-auto max-w-3xl px-6 py-14 sm:px-10">
-        <Link href="/" className="text-lg font-extrabold lowercase tracking-tight text-white">
-          morbin
-        </Link>
-        <h1 className="mt-10 text-3xl font-bold tracking-tight text-white sm:text-4xl">
-          Privacy Policy
-        </h1>
-        <p className="mt-2 text-sm text-neutral-500">Effective date: 18 September 2026</p>
-        <div className="mt-10 space-y-8">
-          {sections.map((s) => (
-            <section key={s.h}>
-              <h2 className="text-lg font-semibold text-white">{s.h}</h2>
-              <p className="mt-2 text-sm leading-relaxed">{s.p}</p>
-            </section>
-          ))}
-        </div>
-        <div className="mt-12 border-t border-white/10 pt-6 text-xs text-neutral-500">
-          <Link href="/" className="mr-5 transition-colors hover:text-neutral-300">Home</Link>
-          <Link href="/legal/terms" className="transition-colors hover:text-neutral-300">Terms &amp; Conditions</Link>
-        </div>
+    <>
+      <h1 className="mt-10 text-3xl font-bold tracking-tight text-white sm:text-4xl">
+        Privacy Policy
+      </h1>
+      <p className="mt-2 text-sm text-neutral-500">Effective date: 18 September 2026</p>
+      <div className="mt-10 space-y-8">
+        {sections.map((s) => (
+          <section key={s.h}>
+            <h2 className="text-lg font-semibold text-white">{s.h}</h2>
+            <p className="mt-2 text-sm leading-relaxed">{s.p}</p>
+          </section>
+        ))}
       </div>
-    </div>
+      <LegalFooter
+        links={[
+          { href: "/", label: "Home" },
+          { href: "/legal/terms", label: "Terms & Conditions" },
+        ]}
+      />
+    </>
   );
 }
