@@ -4,6 +4,7 @@ import { z } from "zod";
 import {
   CHECKOUT_COOKIE,
   branchClaimedUnitsFor,
+  flowForSession,
   consumeOtp,
   getCheckoutSession,
   getSessionByResumeToken,
@@ -14,7 +15,7 @@ import {
 } from "@/lib/checkout";
 import { getDb, toObjectId } from "@/lib/db";
 import { appUrl } from "@/lib/email";
-import { emailMatchesIdentity, getActiveFlow } from "@/lib/flows";
+import { emailMatchesIdentity } from "@/lib/flows";
 import { lookupIdentityStep } from "@/lib/flow-rules";
 import type { CheckoutFlow, EmailRecord, Event, FlowOption, FlowStep } from "@/lib/types";
 
@@ -36,9 +37,8 @@ const requestSchema = z.object({
 const GENERIC = "If that address is eligible, a link is on its way.";
 
 /** The option whose policy governs identity for the session's current branch. */
-async function identityOption(eventId: string, branchValue: string | null) {
+async function identityOption(flow: CheckoutFlow, branchValue: string | null) {
   if (!branchValue) return null;
-  const flow: CheckoutFlow = await getActiveFlow(eventId);
   for (const step of flow.steps) {
     if (step.kind !== "SINGLE_CHOICE" || !step.options) continue;
     const option: FlowOption | undefined = step.options.find(
@@ -63,8 +63,9 @@ export async function POST(request: Request) {
 
   // A lookup that derives the address decides it: whatever the client sends is
   // ignored, so the link can only ever go to the address the dataset row implies.
-  const lookupStep = lookupIdentityStep(await getActiveFlow(session.eventId));
-  const option = await identityOption(session.eventId, session.branch?.value ?? null);
+  const flow = await flowForSession(session);
+  const lookupStep = lookupIdentityStep(flow);
+  const option = await identityOption(flow, session.branch?.value ?? null);
   let email: string;
   if (lookupStep) {
     const derived = session.lookups?.[lookupStep.id]?.derivedEmail;
@@ -91,6 +92,25 @@ export async function POST(request: Request) {
     if (used >= option.capacity) {
       return NextResponse.json({ message: GENERIC }, { status: 202 });
     }
+  }
+
+  // A builder test run sends no email: the address counts as confirmed, so the
+  // organiser can walk the rest of the journey.
+  if (session.test) {
+    const resume = await setResumeToken(session.publicId, {
+      method: "EMAIL_OTP",
+      email,
+      verifiedAt: new Date(),
+      via: "EMAIL_OTP",
+    });
+    jar.set(CHECKOUT_COOKIE, resume, {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      path: "/",
+      maxAge: 2 * 60 * 60,
+    });
+    return NextResponse.json({ testVerified: true, email }, { status: 200 });
   }
 
   const wait = await resendWaitSeconds(session.publicId);

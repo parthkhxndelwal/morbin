@@ -9,6 +9,7 @@ import {
   branchClaimedUnitsFor,
   claimedUnitsFor,
   createCheckoutSession,
+  flowForSession,
   getCheckoutSession,
   getSessionByResumeToken,
   saveCustomFields,
@@ -18,7 +19,8 @@ import {
 import { getBranding } from "@/lib/branding";
 import { getDb, toObjectId } from "@/lib/db";
 import { getTicketTypes } from "@/lib/events";
-import { emailMatchesIdentity, getActiveFlow, resolveOffer } from "@/lib/flows";
+import { emailMatchesIdentity, getActiveFlow, getFlowDraft, resolveOffer } from "@/lib/flows";
+import { verifyTestRun } from "@/lib/test-run";
 import { lookupIdentityStep } from "@/lib/flow-rules";
 import { matchLookup } from "@/lib/lookups";
 import { clientIp, rateLimit } from "@/lib/rate-limit";
@@ -86,13 +88,14 @@ async function describe(session: NonNullable<Awaited<ReturnType<typeof getChecko
   const db = await getDb();
   const [event, flow, ticketTypes, branding] = await Promise.all([
     eventOid ? db.collection<Event>("events").findOne({ _id: eventOid }) : null,
-    getActiveFlow(session.eventId),
+    flowForSession(session),
     getTicketTypes(session.eventId),
     getBranding(session.eventId),
   ]);
 
   // A session whose event vanished or ended must not keep offering seats.
-  if (!event || event.status !== "PUBLISHED" || event.endsAt < new Date()) {
+  const testable = session.test && event?.status === "DRAFT";
+  if (!event || (event.status !== "PUBLISHED" && !testable) || event.endsAt < new Date()) {
     return { gone: true as const };
   }
 
@@ -179,6 +182,8 @@ async function describe(session: NonNullable<Awaited<ReturnType<typeof getChecko
       ctaLabel: branding.ctaLabel,
       customFields: branding.customFields,
     },
+    /** A builder test run: the drawer stops at "This is where the buyer would pay". */
+    testRun: !!session.test,
     /** Only ever sent when the server already knows the address is verified. */
     resumeTokenRequired: !session.identity.verifiedAt,
   };
@@ -191,35 +196,46 @@ export async function POST(request: Request) {
     utm_source?: string;
     utm_medium?: string;
     utm_campaign?: string;
+    /** Signed by the builder's "Run through checkout as a buyer". */
+    testToken?: string;
   };
   if (!body.eventId || !toObjectId(body.eventId)) {
     return NextResponse.json({ error: "Invalid event" }, { status: 400 });
   }
+  const test = verifyTestRun(body.testToken);
+  if (body.testToken && (!test || test.eventId !== body.eventId)) {
+    return NextResponse.json({ error: "This test link has expired. Start it again from Booking rules." }, { status: 403 });
+  }
   const db = await getDb();
   const event = await db
     .collection<Event>("events")
-    .findOne({ _id: toObjectId(body.eventId) as never, status: "PUBLISHED" });
+    .findOne({ _id: toObjectId(body.eventId) as never, status: test ? { $in: ["PUBLISHED", "DRAFT"] } : "PUBLISHED" });
   if (!event || event.endsAt < new Date()) {
     return NextResponse.json({ error: "This event is not available" }, { status: 404 });
   }
 
-  // Returning to an unfinished funnel continues it rather than starting over.
+  // Returning to an unfinished funnel continues it rather than starting over —
+  // but a test run and a real checkout never share a session.
   const existing = await loadSessionFromCookie();
   if (
     existing &&
     existing.eventId === event._id.toString() &&
+    !!existing.test === !!test &&
     (existing.status === "IN_PROGRESS" || existing.status === "IDENTITY_VERIFIED")
   ) {
     return NextResponse.json(await describe(existing), { status: 200 });
   }
 
-  const flow = await getActiveFlow(event._id.toString());
+  // A test run follows the draft (falling back to the live rules), frozen now.
+  const draft = test ? await getFlowDraft(event._id.toString()) : null;
+  const flow = draft ?? (await getActiveFlow(event._id.toString()));
   // UTM is captured here, at the top of the funnel, and is the only place in the
   // app that reads it. The QR code on a poster is the acquisition channel, so
   // without this the campaign is unattributable end to end.
   const session = await createCheckoutSession({
     eventId: event._id.toString(),
     flowVersion: flow.version,
+    testFlow: test ? { version: flow.version, steps: flow.steps } : null,
     utm: {
       source: body.utm_source?.slice(0, MAX_TEXT) ?? null,
       medium: body.utm_medium?.slice(0, MAX_TEXT) ?? null,
@@ -259,7 +275,7 @@ export async function PATCH(request: Request) {
     if (!body.stepId || typeof body.value !== "string") {
       return NextResponse.json({ error: "Invalid answer" }, { status: 400 });
     }
-    const flow: CheckoutFlow = await getActiveFlow(session.eventId);
+    const flow: CheckoutFlow = await flowForSession(session);
     const step: FlowStep | undefined = flow.steps.find((s: FlowStep) => s.id === body.stepId);
     if (!step) return NextResponse.json({ error: "Unknown step" }, { status: 400 });
     if (step.kind === "LOOKUP" && step.lookup) {
@@ -314,7 +330,7 @@ export async function PATCH(request: Request) {
   }
 
   if (body.action === "identity") {
-    const flow: CheckoutFlow = await getActiveFlow(session.eventId);
+    const flow: CheckoutFlow = await flowForSession(session);
     const step: FlowStep | undefined = flow.steps.find(
       (s: FlowStep) => s.kind === "SINGLE_CHOICE" && session.branch?.stepId === s.id,
     );

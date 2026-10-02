@@ -6,7 +6,10 @@ import {
   ArrowUpIcon,
   CheckCircle2Icon,
   CircleDotIcon,
+  FlaskConicalIcon,
+  HistoryIcon,
   IdCardIcon,
+  LifeBuoyIcon,
   MailCheckIcon,
   PlusIcon,
   SettingsIcon,
@@ -46,6 +49,9 @@ import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { resolveOffer } from "@/lib/flow-rules";
+import { findProblems } from "@/lib/flow-problems";
+import { diffFlows, summariseDiff } from "@/lib/flow-diff";
+import type { FlowVersionView } from "@/lib/flows";
 import { lookupValue, maskEmail, renderTemplate, templateErrors } from "@/lib/template-rules";
 import type { DatasetColumn } from "@/lib/dataset-rules";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
@@ -172,65 +178,6 @@ function answerChips(o: FlowOption, tickets: BuilderTicket[], fields: CheckoutFi
 
 /* ── Problems that would confuse buyers or be refused on save ───────────── */
 
-type Problem = { blocking: boolean; text: string };
-
-function lookupProblems(q: FlowStep, name: string, datasets: BuilderDataset[]): Problem[] {
-  const out: Problem[] = [];
-  if (!q.title.trim()) out.push({ blocking: true, text: `${name} has no wording.` });
-  const l = q.lookup;
-  const dataset = datasets.find((d) => d.id === l?.datasetId);
-  if (!l || !dataset) {
-    out.push({ blocking: true, text: `${name}: choose the list to check against.` });
-    return out;
-  }
-  if (!dataset.columns.some((c) => c.key === l.matchColumn)) {
-    out.push({ blocking: true, text: `${name}: choose which column to match.` });
-  }
-  if (l.emailTemplate) {
-    for (const e of templateErrors(l.emailTemplate, dataset.columns.map((c) => c.key))) {
-      out.push({ blocking: true, text: `${name}: ${e}.` });
-    }
-  } else if (l.identityMethod === "EMAIL_OTP") {
-    out.push({ blocking: true, text: `${name} confirms an email but has no email template.` });
-  }
-  if (dataset.columns.length && !dataset.sample) {
-    out.push({ blocking: false, text: `${name}: “${dataset.name}” has no rows yet, so nobody can match.` });
-  }
-  return out;
-}
-
-function findProblems(questions: FlowStep[], datasets: BuilderDataset[]): Problem[] {
-  const out: Problem[] = [];
-  if (questions.filter((q) => q.kind === "LOOKUP" && q.lookup?.identityMethod === "EMAIL_OTP").length > 1) {
-    out.push({ blocking: true, text: "Only one ID question can decide which email is confirmed." });
-  }
-  questions.forEach((q, qi) => {
-    const name = `Question ${qi + 1}`;
-    if (q.kind === "LOOKUP") {
-      out.push(...lookupProblems(q, name, datasets));
-      return;
-    }
-    if (!q.title.trim()) out.push({ blocking: true, text: `${name} has no wording.` });
-    const answers = q.options ?? [];
-    if (answers.length < 2) out.push({ blocking: true, text: `${name} needs at least two answers to choose from.` });
-    answers.forEach((a, ai) => {
-      if (!a.label.trim()) out.push({ blocking: true, text: `${name}: answer ${ai + 1} is empty.` });
-      if (a.identity?.method === "EMAIL_OTP" && !a.identity.emailDomain) {
-        out.push({
-          blocking: false,
-          text: `${name}: “${a.label || `answer ${ai + 1}`}” confirms an email but doesn't limit the domain, so any address works.`,
-        });
-      }
-      if (a.allowedTicketTypeIds && a.allowedTicketTypeIds.length === 0) {
-        out.push({ blocking: true, text: `${name}: “${a.label || `answer ${ai + 1}`}” can't buy any ticket.` });
-      }
-    });
-    const labels = answers.map((a) => a.label.trim().toLowerCase()).filter(Boolean);
-    if (new Set(labels).size !== labels.length) out.push({ blocking: true, text: `${name} has two answers with the same wording.` });
-  });
-  return out;
-}
-
 /* ── Main ────────────────────────────────────────────────────────────────── */
 
 export function FlowBuilder({
@@ -244,7 +191,13 @@ export function FlowBuilder({
   proposeOnly = false,
   datasets,
   datasetsHref,
+  versions,
+  viewerIsSupport,
 }: {
+  /** Published versions, newest first. */
+  versions: FlowVersionView[];
+  /** Morbin support is viewing (as opposed to the owner). */
+  viewerIsSupport: boolean;
   datasets: BuilderDataset[];
   /** Where the organisation's datasets are managed (owner or support route). */
   datasetsHref: string;
@@ -254,7 +207,7 @@ export function FlowBuilder({
   ticketTypes: BuilderTicket[];
   customFields: CheckoutField[];
   published: { version: number; steps: FlowStep[] };
-  draft: { steps: FlowStep[] } | null;
+  draft: { steps: FlowStep[]; savedAs: "OWNER" | "SUPPORT" | null } | null;
   eventStatus: string;
   maxPerType: number;
 }) {
@@ -263,12 +216,14 @@ export function FlowBuilder({
   const [saved, setSaved] = useState<FlowStep[]>(() => questionsOf(draft?.steps ?? published.steps));
   const [questions, setQuestions] = useState<FlowStep[]>(saved);
   const [editing, setEditing] = useState<{ q: string; a: string } | null>(null);
-  const [busy, setBusy] = useState<"" | "save" | "publish">("");
+  const [busy, setBusy] = useState<"" | "save" | "publish" | "discard" | "test">("");
+  const [draftAs, setDraftAs] = useState(draft?.savedAs ?? null);
+  const ticketName = (id: string) => ticketTypes.find((t) => t.id === id)?.name ?? "a removed ticket";
 
   const same = (a: FlowStep[], b: FlowStep[]) => JSON.stringify(a) === JSON.stringify(b);
   const unsaved = !same(questions, saved);
   const draftPending = !same(saved, live);
-  const problems = findProblems(questions, datasets);
+  const problems = findProblems(questions, { datasets, tickets: ticketTypes });
   const blocked = problems.some((p) => p.blocking);
 
   function patchQuestion(id: string, patch: Partial<FlowStep>) {
@@ -294,12 +249,12 @@ export function FlowBuilder({
     });
   }
 
-  async function save(publish: boolean) {
+  async function save(publish: boolean, steps: FlowStep[] = questions) {
     setBusy(publish ? "publish" : "save");
     const res = await fetch(`/api/events/${eventId}/flow`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ steps: questions, publish }),
+      body: JSON.stringify({ steps, publish }),
     });
     const body = await res.json().catch(() => ({}));
     setBusy("");
@@ -307,7 +262,9 @@ export function FlowBuilder({
       toast.error(body.error ?? "Couldn't save the booking rules.");
       return;
     }
-    setSaved(questions);
+    setSaved(steps);
+    setQuestions(steps);
+    setDraftAs(body.published ? null : viewerIsSupport ? "SUPPORT" : "OWNER");
     if (body.published) router.refresh();
     toast.success(
       body.proposed
@@ -317,6 +274,43 @@ export function FlowBuilder({
           : "Draft saved. Buyers still follow the published rules.",
     );
   }
+
+  /** The owner rejects support's proposal: the draft is deleted, live rules untouched. */
+  async function discardDraft() {
+    setBusy("discard");
+    const res = await fetch(`/api/events/${eventId}/flow`, { method: "DELETE" });
+    setBusy("");
+    if (!res.ok) {
+      toast.error("Couldn't discard the proposal.");
+      return;
+    }
+    setSaved(live);
+    setQuestions(live);
+    setDraftAs(null);
+    toast.success("Proposal discarded. The published rules are unchanged.");
+    router.refresh();
+  }
+
+  /** Open the real drawer in test mode, with the saved draft (or the live rules). */
+  async function testRun() {
+    setBusy("test");
+    const res = await fetch(`/api/events/${eventId}/flow/test-run`, { method: "POST" });
+    const body = await res.json().catch(() => ({}));
+    setBusy("");
+    if (!res.ok) {
+      toast.error(body.error ?? "Couldn't start a test run.");
+      return;
+    }
+    window.open(body.url, "_blank", "noopener");
+  }
+
+  function restore(v: FlowVersionView) {
+    setQuestions(questionsOf(v.steps));
+    toast.success(`Version ${v.version} loaded. Save or publish it to make it a new version.`);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  const proposal = !viewerIsSupport && draftAs === "SUPPORT" && draftPending ? diffFlows(live, saved, ticketName) : null;
 
   const editingQuestion = editing ? questions.find((q) => q.id === editing.q) : null;
   const editingAnswer = editingQuestion?.options?.find((a) => a.id === editing?.a) ?? null;
@@ -332,6 +326,32 @@ export function FlowBuilder({
           </p>
         </div>
 
+        {proposal && (
+          <Alert>
+            <LifeBuoyIcon />
+            <AlertTitle>Morbin support proposed changes</AlertTitle>
+            <AlertDescription className="space-y-3">
+              <p>Buyers still follow the published rules. Review what would change, then publish or discard it.</p>
+              <ul className="list-disc space-y-1 pl-4">
+                {(proposal.length ? proposal : ["No visible changes"]).map((c) => (
+                  <li key={c}>{c}</li>
+                ))}
+              </ul>
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" onClick={() => save(true, saved)} disabled={busy !== "" || unsaved}>
+                  {busy === "publish" && <Spinner data-icon="inline-start" />}
+                  Publish proposal
+                </Button>
+                <Button size="sm" variant="outline" onClick={discardDraft} disabled={busy !== ""}>
+                  {busy === "discard" && <Spinner data-icon="inline-start" />}
+                  Discard
+                </Button>
+              </div>
+              {unsaved && <p className="text-xs">You have your own unsaved edits; save or discard them first.</p>}
+            </AlertDescription>
+          </Alert>
+        )}
+
         <StatusBar
           unsaved={unsaved}
           draftPending={draftPending}
@@ -342,6 +362,8 @@ export function FlowBuilder({
           onPublish={() => save(true)}
           publishLabel={proposeOnly ? "Send to owner" : "Publish"}
           onDiscard={() => setQuestions(saved)}
+          onTestRun={testRun}
+          testDisabled={busy !== "" || unsaved}
         />
 
         {questions.length === 0 ? (
@@ -436,7 +458,10 @@ export function FlowBuilder({
       </div>
 
       <aside className="lg:sticky lg:top-6 lg:self-start">
-        <BuyerPreview eventId={eventId} questions={questions} tickets={ticketTypes} fields={customFields} datasets={datasets} />
+        <div className="space-y-6">
+          <BuyerPreview eventId={eventId} questions={questions} tickets={ticketTypes} fields={customFields} datasets={datasets} />
+          <History versions={versions} ticketName={ticketName} onRestore={restore} disabled={busy !== ""} />
+        </div>
       </aside>
 
       <Sheet open={!!editingAnswer} onOpenChange={(o) => !o && setEditing(null)}>
@@ -678,11 +703,15 @@ function StatusBar({
   onPublish,
   onDiscard,
   publishLabel,
+  onTestRun,
+  testDisabled,
 }: {
+  onTestRun: () => void;
+  testDisabled: boolean;
   unsaved: boolean;
   draftPending: boolean;
   eventStatus: string;
-  busy: "" | "save" | "publish";
+  busy: "" | "save" | "publish" | "discard" | "test";
   blocked: boolean;
   onSave: () => void;
   onPublish: () => void;
@@ -712,6 +741,16 @@ function StatusBar({
           </div>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onTestRun}
+            disabled={testDisabled}
+            title={unsaved ? "Save first: a test run uses the saved rules" : undefined}
+          >
+            {busy === "test" ? <Spinner data-icon="inline-start" /> : <FlaskConicalIcon data-icon="inline-start" />}
+            Run through checkout as a buyer
+          </Button>
           {unsaved && (
             <Button variant="ghost" size="sm" onClick={onDiscard} disabled={busy !== ""}>
               Discard
@@ -1215,6 +1254,68 @@ function LookupTry({ eventId, step, dataset }: { eventId: string; step: FlowStep
           </p>
         ))}
     </div>
+  );
+}
+
+/* ── History ────────────────────────────────────────────────────────────── */
+
+function History({
+  versions,
+  ticketName,
+  onRestore,
+  disabled,
+}: {
+  versions: FlowVersionView[];
+  ticketName: (id: string) => string;
+  onRestore: (v: FlowVersionView) => void;
+  disabled: boolean;
+}) {
+  if (versions.length === 0) return null;
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <HistoryIcon className="size-4 text-muted-foreground" />
+          History
+        </CardTitle>
+        <CardDescription>Every published version. Restoring loads it into the editor; nothing changes until you publish.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <ol className="space-y-4 text-sm">
+          {versions.map((v, i) => {
+            const previous = versions[i + 1];
+            const changes = previous ? summariseDiff(diffFlows(previous.steps, v.steps, ticketName)) : "First published version";
+            const who =
+              v.publishedAs === "SUPPORT"
+                ? `Morbin support${v.publishedByName ? ` (${v.publishedByName})` : ""}`
+                : (v.publishedByName ?? "The organisation");
+            return (
+              <li key={v.version} className="space-y-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-medium">Version {v.version}</span>
+                  {v.live && <Badge variant="secondary">Live</Badge>}
+                  {v.publishedAs === "SUPPORT" && (
+                    <Badge variant="outline">
+                      <LifeBuoyIcon data-icon="inline-start" />
+                      Support
+                    </Badge>
+                  )}
+                </div>
+                <p className="text-muted-foreground">
+                  {new Date(v.publishedAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })} · {who}
+                </p>
+                <p>{changes}</p>
+                {!v.live && (
+                  <Button variant="outline" size="xs" onClick={() => onRestore(v)} disabled={disabled}>
+                    Restore
+                  </Button>
+                )}
+              </li>
+            );
+          })}
+        </ol>
+      </CardContent>
+    </Card>
   );
 }
 

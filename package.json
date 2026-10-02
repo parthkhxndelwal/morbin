@@ -20,6 +20,7 @@
     "check:invoice": "tsx lib/invoice-rules.check.mts",
     "check:datasets": "node --experimental-strip-types lib/dataset-rules.check.mts",
     "check:templates": "node --experimental-strip-types lib/template-rules.check.mts",
+    "check:flow": "node --experimental-strip-types lib/flow-diff.check.mts",
     "check:lookups": "tsx --tsconfig scripts/tsconfig.checks.json --env-file=.env.local scripts/check-lookups.mts"
   },
   "dependencies": {
