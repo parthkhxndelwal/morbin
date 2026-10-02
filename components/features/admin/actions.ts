@@ -17,6 +17,7 @@ import { err, ok, zodFieldErrors, type Result } from "@/lib/result";
 import { inviteToTeam, removeFromTeam, revokeInvite, type InviteOutcome } from "@/lib/team";
 import { TxAbort } from "@/lib/tx";
 import { savePlatformSettings } from "@/lib/platform-settings";
+import { runRetention } from "@/lib/retention";
 import {
   adminCreateOrgSchema,
   adminOrgBasicsSchema,
@@ -189,4 +190,13 @@ export async function savePlatformSettingsAction(formData: FormData): Promise<Re
       ),
     "Settings saved",
   );
+}
+
+export async function runRetentionAction(): Promise<Result> {
+  const a = await admin();
+  if ("error" in a) return err(a.error);
+  return run(async () => {
+    const r = await runRetention({ trigger: "ADMIN", actorId: a.id });
+    if (!r.ran) throw new TxAbort("A retention run is already in progress.");
+  }, "Retention run finished");
 }
