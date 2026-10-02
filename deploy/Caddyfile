@@ -1,8 +1,16 @@
 {
 	email {$ACME_EMAIL}
+	servers {
+		# Direct mode: nothing sits in front of Caddy, so only loopback is
+		# trusted. Tunnel mode widens this to the Docker bridge, where the
+		# host's cloudflared connects from (see docker-compose.tunnel.yml).
+		trusted_proxies static {$TRUSTED_PROXIES:127.0.0.1/32}
+	}
 }
 
-{$MORBIN_DOMAIN} {
+# Direct mode: the bare domain, so Caddy obtains a Let's Encrypt certificate.
+# Tunnel mode: "http://<domain>", because TLS terminates at Cloudflare.
+{$MORBIN_SITE_ADDRESS} {
 	encode zstd gzip
 
 	header {

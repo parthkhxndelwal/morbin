@@ -1,0 +1,5 @@
+graphify-out/graph.json merge=graphify
+*.sh text eol=lf
+deploy/** text eol=lf
+Dockerfile text eol=lf
+*.yml text eol=lf

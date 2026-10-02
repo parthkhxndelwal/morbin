@@ -1,0 +1,19 @@
+# Cloudflare Tunnel ingress (optional). Use with:
+#   docker compose -f docker-compose.yml -f docker-compose.tunnel.yml up -d --build
+#
+# No inbound ports are opened. Caddy serves plain HTTP on 127.0.0.1:8080 and
+# the host's existing cloudflared service forwards to it: in the Cloudflare
+# dashboard add a Public Hostname on that tunnel, morbin.space -> http://localhost:8080.
+#
+# DPDP: in this mode TLS terminates at Cloudflare, so request contents
+# (including personal data in transit) pass through Cloudflare's network.
+# List Cloudflare as a processor if you use it.
+
+services:
+  caddy:
+    ports: !override
+      - "127.0.0.1:8080:80"
+    environment:
+      MORBIN_SITE_ADDRESS: http://${MORBIN_DOMAIN}
+      # cloudflared on the host reaches Caddy through the Docker bridge.
+      TRUSTED_PROXIES: private_ranges

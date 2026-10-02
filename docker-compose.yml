@@ -1,6 +1,11 @@
 # Morbin on a single server.
 #
-#   docker compose up -d --build
+#   Direct mode (default, recommended for DPDP — TLS ends on this server):
+#     docker compose up -d --build
+#   Cloudflare Tunnel mode (no inbound ports; TLS ends at Cloudflare):
+#     docker compose -f docker-compose.yml -f docker-compose.tunnel.yml up -d --build
+#
+# Bind mounts carry ":z"/":Z" so they work with SELinux enforcing (Oracle Linux).
 #
 # Only Caddy publishes ports. MongoDB and the app are reachable solely on the
 # internal network, and every byte of personal data lives in the named volumes
@@ -17,10 +22,10 @@ services:
       - "443:443"
       - "443:443/udp"
     environment:
-      MORBIN_DOMAIN: ${MORBIN_DOMAIN:?set MORBIN_DOMAIN in .env}
+      MORBIN_SITE_ADDRESS: ${MORBIN_DOMAIN:?set MORBIN_DOMAIN in .env}
       ACME_EMAIL: ${ACME_EMAIL:-}
     volumes:
-      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro,z
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
@@ -74,8 +79,8 @@ services:
     entrypoint: ["/bin/bash", "/deploy/mongo-entrypoint.sh"]
     volumes:
       - mongo_data:/data/db
-      - ./deploy/mongo-entrypoint.sh:/deploy/mongo-entrypoint.sh:ro
-      - ./deploy/mongo-init.js:/docker-entrypoint-initdb.d/10-app-user.js:ro
+      - ./deploy/mongo-entrypoint.sh:/deploy/mongo-entrypoint.sh:ro,z
+      - ./deploy/mongo-init.js:/docker-entrypoint-initdb.d/10-app-user.js:ro,z
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "-u", "${MONGO_ROOT_USER}", "-p", "${MONGO_ROOT_PASSWORD}", "--eval", "try { rs.status().ok } catch (e) { rs.initiate({_id:'rs0',members:[{_id:0,host:'mongo:27017'}]}).ok }"]
       interval: 10s
@@ -97,10 +102,10 @@ services:
       BACKUP_PASSPHRASE: ${BACKUP_PASSPHRASE:?set BACKUP_PASSPHRASE}
     entrypoint: ["/bin/bash", "/deploy/backup.sh"]
     volumes:
-      - ./deploy/backup.sh:/deploy/backup.sh:ro
+      - ./deploy/backup.sh:/deploy/backup.sh:ro,z
       - media:/data/media:ro
       - documents:/data/documents:ro
-      - ${BACKUP_DIR:-./backups}:/backups
+      - ${BACKUP_DIR:-./backups}:/backups:Z
     depends_on:
       mongo:
         condition: service_healthy

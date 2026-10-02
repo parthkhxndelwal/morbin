@@ -12,7 +12,52 @@ named volumes on that host.
 - Disk encryption on the host volume (LUKS or the provider's encrypted disk) —
   MongoDB Community does not encrypt at rest by itself
 
-## First deploy
+## Production server (`oci2`)
+
+| | |
+|---|---|
+| SSH alias | `oci2` → `opc@140.245.231.7` |
+| OS | Oracle Linux 9.8, **aarch64**, SELinux enforcing, firewalld |
+| Also running | `n8n` + `n8n-postgres` (Docker, port 5678) and a host `cloudflared` tunnel service. Morbin uses the Compose project name `morbin` and touches neither. |
+| Layout | `/opt/morbin/.env` (mode 600, server-only), `/opt/morbin/releases/<sha>`, `/opt/morbin/current`, `/opt/morbin/backups` |
+
+All images used (`node:22-alpine`, `mongo:7`, `caddy:2-alpine`) publish
+arm64 builds.
+
+### One-time setup
+
+1. `scripts/server-init.sh` — creates `/opt/morbin` and a `.env` whose
+   internal secrets are generated on the server. *(Done 2026-10-02.)*
+2. On the server, fill the blank provider values in `/opt/morbin/.env`:
+   `ADMIN_EMAILS`, `ADMIN_BOOTSTRAP_PASSWORD`, `RAZORPAY_*`,
+   `NEXT_PUBLIC_RAZORPAY_KEY_ID`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`,
+   optionally `ACME_EMAIL` and `AUTH_GOOGLE_*`.
+3. **Direct mode (default):** open HTTP/HTTPS.
+   - Host firewall:
+     ```bash
+     sudo firewall-cmd --permanent --add-service=http --add-service=https && sudo firewall-cmd --reload
+     ```
+   - Oracle Cloud console → the instance's VCN → Security List: add ingress
+     rules for TCP 80 and 443 from `0.0.0.0/0`.
+   - Cloudflare DNS for `morbin.space`: an `A` record to `140.245.231.7`,
+     **DNS only (grey cloud)**, so TLS terminates on this server. Do this at
+     cut-over: the domain currently routes to the Cloudflare Worker.
+4. **Tunnel mode (optional):** no firewall changes. In the Cloudflare
+   dashboard add a Public Hostname on the existing tunnel:
+   `morbin.space` → `http://localhost:8080`, then deploy with
+   `scripts/deploy.sh tunnel`.
+
+### Deploying
+
+```bash
+scripts/deploy.sh          # direct mode
+scripts/deploy.sh tunnel   # tunnel mode
+```
+
+Ships the committed `HEAD` only, builds on the server, waits for the app
+healthcheck, and restarts the previous release if the new one is unhealthy.
+
+## First deploy (any other host)
 
 ```bash
 git clone <repo> morbin && cd morbin
