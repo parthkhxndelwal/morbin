@@ -6,6 +6,7 @@ import {
   ArrowUpIcon,
   CheckCircle2Icon,
   CircleDotIcon,
+  IdCardIcon,
   MailCheckIcon,
   PlusIcon,
   SettingsIcon,
@@ -45,6 +46,10 @@ import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { resolveOffer } from "@/lib/flow-rules";
+import { lookupValue, maskEmail, renderTemplate, templateErrors } from "@/lib/template-rules";
+import type { DatasetColumn } from "@/lib/dataset-rules";
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import Link from "next/link";
 import { formatINR } from "@/lib/format";
 import type { CheckoutFlow, FlowOption, FlowStep, TicketType } from "@/lib/types";
 
@@ -79,11 +84,39 @@ export type BuilderTicket = {
 
 type CheckoutField = { id: string; label: string; required: boolean };
 
+/** An organisation dataset, for lookup questions. `sample` is its first row, for the live template example. */
+export type BuilderDataset = {
+  id: string;
+  name: string;
+  columns: DatasetColumn[];
+  keyColumn: string | null;
+  sample: Record<string, string> | null;
+};
+
 const uid = (prefix: string) => `${prefix}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 
-/** Only questions mean anything to the checkout; everything else is dropped. */
+/** Only questions and ID checks mean anything to the checkout; everything else is dropped. */
 function questionsOf(steps: FlowStep[]): FlowStep[] {
-  return steps.filter((s) => s.kind === "SINGLE_CHOICE");
+  return steps.filter((s) => s.kind === "SINGLE_CHOICE" || s.kind === "LOOKUP");
+}
+
+/** "Ask for an ID and check it against a list", defaulting to the first dataset's key column. */
+function newLookup(datasets: BuilderDataset[]): FlowStep {
+  const d = datasets.find((x) => x.keyColumn) ?? null;
+  return {
+    id: uid("l_"),
+    kind: "LOOKUP",
+    title: "Enter your roll number",
+    required: true,
+    lookup: {
+      datasetId: d?.id ?? "",
+      matchColumn: d?.keyColumn ?? "",
+      inputHint: null,
+      emailTemplate: null,
+      identityMethod: null,
+      oneTicketPerRow: true,
+    },
+  };
 }
 
 function newAnswer(label = ""): FlowOption {
@@ -141,10 +174,42 @@ function answerChips(o: FlowOption, tickets: BuilderTicket[], fields: CheckoutFi
 
 type Problem = { blocking: boolean; text: string };
 
-function findProblems(questions: FlowStep[]): Problem[] {
+function lookupProblems(q: FlowStep, name: string, datasets: BuilderDataset[]): Problem[] {
   const out: Problem[] = [];
+  if (!q.title.trim()) out.push({ blocking: true, text: `${name} has no wording.` });
+  const l = q.lookup;
+  const dataset = datasets.find((d) => d.id === l?.datasetId);
+  if (!l || !dataset) {
+    out.push({ blocking: true, text: `${name}: choose the list to check against.` });
+    return out;
+  }
+  if (!dataset.columns.some((c) => c.key === l.matchColumn)) {
+    out.push({ blocking: true, text: `${name}: choose which column to match.` });
+  }
+  if (l.emailTemplate) {
+    for (const e of templateErrors(l.emailTemplate, dataset.columns.map((c) => c.key))) {
+      out.push({ blocking: true, text: `${name}: ${e}.` });
+    }
+  } else if (l.identityMethod === "EMAIL_OTP") {
+    out.push({ blocking: true, text: `${name} confirms an email but has no email template.` });
+  }
+  if (dataset.columns.length && !dataset.sample) {
+    out.push({ blocking: false, text: `${name}: “${dataset.name}” has no rows yet, so nobody can match.` });
+  }
+  return out;
+}
+
+function findProblems(questions: FlowStep[], datasets: BuilderDataset[]): Problem[] {
+  const out: Problem[] = [];
+  if (questions.filter((q) => q.kind === "LOOKUP" && q.lookup?.identityMethod === "EMAIL_OTP").length > 1) {
+    out.push({ blocking: true, text: "Only one ID question can decide which email is confirmed." });
+  }
   questions.forEach((q, qi) => {
     const name = `Question ${qi + 1}`;
+    if (q.kind === "LOOKUP") {
+      out.push(...lookupProblems(q, name, datasets));
+      return;
+    }
     if (!q.title.trim()) out.push({ blocking: true, text: `${name} has no wording.` });
     const answers = q.options ?? [];
     if (answers.length < 2) out.push({ blocking: true, text: `${name} needs at least two answers to choose from.` });
@@ -177,7 +242,12 @@ export function FlowBuilder({
   eventStatus,
   maxPerType,
   proposeOnly = false,
+  datasets,
+  datasetsHref,
 }: {
+  datasets: BuilderDataset[];
+  /** Where the organisation's datasets are managed (owner or support route). */
+  datasetsHref: string;
   /** Support with the owner's approval switch on: "Publish" becomes "Send to owner". */
   proposeOnly?: boolean;
   eventId: string;
@@ -198,7 +268,7 @@ export function FlowBuilder({
   const same = (a: FlowStep[], b: FlowStep[]) => JSON.stringify(a) === JSON.stringify(b);
   const unsaved = !same(questions, saved);
   const draftPending = !same(saved, live);
-  const problems = findProblems(questions);
+  const problems = findProblems(questions, datasets);
   const blocked = problems.some((p) => p.blocking);
 
   function patchQuestion(id: string, patch: Partial<FlowStep>) {
@@ -298,11 +368,24 @@ export function FlowBuilder({
                 <UsersIcon data-icon="inline-start" />
                 Start from “Students and guests”
               </Button>
+              <AddLookupButton datasets={datasets} datasetsHref={datasetsHref} onAdd={() => setQuestions([newLookup(datasets)])} />
             </CardContent>
           </Card>
         ) : (
           <>
-            {questions.map((q, i) => (
+            {questions.map((q, i) =>
+              q.kind === "LOOKUP" ? (
+                <LookupCard
+                  key={q.id}
+                  index={i}
+                  count={questions.length}
+                  step={q}
+                  datasets={datasets}
+                  onChange={(patch) => patchQuestion(q.id, patch)}
+                  onMove={(dir) => move(q.id, dir)}
+                  onRemove={() => setQuestions((qs) => qs.filter((x) => x.id !== q.id))}
+                />
+              ) : (
               <QuestionCard
                 key={q.id}
                 index={i}
@@ -315,17 +398,25 @@ export function FlowBuilder({
                 onRemove={() => setQuestions((qs) => qs.filter((x) => x.id !== q.id))}
                 onEditAnswer={(aid) => setEditing({ q: q.id, a: aid })}
               />
-            ))}
+              ),
+            )}
             {questions.length > 1 && (
               <p className="text-sm text-muted-foreground">
                 Buyers answer every question, in this order. When their answers carry different rules, the stricter
                 one wins.
               </p>
             )}
-            <Button variant="outline" onClick={() => setQuestions((qs) => [...qs, newQuestion()])}>
-              <PlusIcon data-icon="inline-start" />
-              Add another question
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" onClick={() => setQuestions((qs) => [...qs, newQuestion()])}>
+                <PlusIcon data-icon="inline-start" />
+                Add another question
+              </Button>
+              <AddLookupButton
+                datasets={datasets}
+                datasetsHref={datasetsHref}
+                onAdd={() => setQuestions((qs) => [...qs, newLookup(datasets)])}
+              />
+            </div>
           </>
         )}
 
@@ -345,7 +436,7 @@ export function FlowBuilder({
       </div>
 
       <aside className="lg:sticky lg:top-6 lg:self-start">
-        <BuyerPreview eventId={eventId} questions={questions} tickets={ticketTypes} fields={customFields} />
+        <BuyerPreview eventId={eventId} questions={questions} tickets={ticketTypes} fields={customFields} datasets={datasets} />
       </aside>
 
       <Sheet open={!!editingAnswer} onOpenChange={(o) => !o && setEditing(null)}>
@@ -364,6 +455,214 @@ export function FlowBuilder({
         </SheetContent>
       </Sheet>
     </div>
+  );
+}
+
+/* ── Lookup questions: "check an ID against a list" ─────────────────────── */
+
+function AddLookupButton({
+  datasets,
+  datasetsHref,
+  onAdd,
+}: {
+  datasets: BuilderDataset[];
+  datasetsHref: string;
+  onAdd: () => void;
+}) {
+  if (!datasets.some((d) => d.keyColumn)) {
+    return (
+      <Button variant="ghost" nativeButton={false} render={<Link href={datasetsHref} />}>
+        <IdCardIcon data-icon="inline-start" />
+        Upload a list to check IDs against
+      </Button>
+    );
+  }
+  return (
+    <Button variant="outline" onClick={onAdd}>
+      <IdCardIcon data-icon="inline-start" />
+      Ask for an ID and check it against a list
+    </Button>
+  );
+}
+
+/** The example the template produces for the dataset's first row. */
+function templateExample(template: string, dataset: BuilderDataset | undefined, matchColumn: string): string | null {
+  if (!template || !dataset?.sample) return null;
+  if (templateErrors(template, dataset.columns.map((c) => c.key)).length) return null;
+  return renderTemplate(template, { value: lookupValue(dataset.sample[matchColumn] ?? ""), row: dataset.sample }).toLowerCase();
+}
+
+function LookupCard({
+  index,
+  count,
+  step,
+  datasets,
+  onChange,
+  onMove,
+  onRemove,
+}: {
+  index: number;
+  count: number;
+  step: FlowStep;
+  datasets: BuilderDataset[];
+  onChange: (patch: Partial<FlowStep>) => void;
+  onMove: (dir: -1 | 1) => void;
+  onRemove: () => void;
+}) {
+  const l = step.lookup!;
+  const dataset = datasets.find((d) => d.id === l.datasetId);
+  const id = (part: string) => `l-${step.id}-${part}`;
+  const patch = (p: Partial<NonNullable<FlowStep["lookup"]>>) => onChange({ lookup: { ...l, ...p } });
+  const templateIssues = l.emailTemplate && dataset ? templateErrors(l.emailTemplate, dataset.columns.map((c) => c.key)) : [];
+  const example = templateExample(l.emailTemplate ?? "", dataset, l.matchColumn);
+  const sampleValue = dataset?.sample?.[l.matchColumn];
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <IdCardIcon className="size-4 text-muted-foreground" />
+          ID check {count > 1 ? index + 1 : ""}
+        </CardTitle>
+        <CardDescription>
+          Buyers type a value; it must be in your list. Nothing from the list is ever shown to them.
+        </CardDescription>
+        <CardAction className="flex gap-1">
+          {count > 1 && (
+            <>
+              <Button variant="ghost" size="icon-xs" onClick={() => onMove(-1)} disabled={index === 0} aria-label="Move up">
+                <ArrowUpIcon />
+              </Button>
+              <Button variant="ghost" size="icon-xs" onClick={() => onMove(1)} disabled={index === count - 1} aria-label="Move down">
+                <ArrowDownIcon />
+              </Button>
+            </>
+          )}
+          <Button variant="ghost" size="xs" className="text-muted-foreground hover:text-destructive" onClick={onRemove}>
+            <Trash2Icon data-icon="inline-start" />
+            Remove
+          </Button>
+        </CardAction>
+      </CardHeader>
+      <CardContent>
+        <FieldGroup>
+          <Field>
+            <FieldLabel htmlFor={id("title")}>What you ask</FieldLabel>
+            <Input
+              id={id("title")}
+              value={step.title}
+              onChange={(e) => onChange({ title: e.target.value })}
+              placeholder="e.g. Enter your roll number"
+              maxLength={160}
+            />
+          </Field>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field>
+              <FieldLabel htmlFor={id("dataset")}>Check it against</FieldLabel>
+              <NativeSelect
+                id={id("dataset")}
+                className="w-full"
+                value={l.datasetId}
+                onChange={(e) => {
+                  const next = datasets.find((d) => d.id === e.target.value);
+                  patch({ datasetId: e.target.value, matchColumn: next?.keyColumn ?? "" });
+                }}
+              >
+                <NativeSelectOption value="">Choose a list…</NativeSelectOption>
+                {datasets
+                  .filter((d) => d.keyColumn)
+                  .map((d) => (
+                    <NativeSelectOption key={d.id} value={d.id}>
+                      {d.name}
+                    </NativeSelectOption>
+                  ))}
+              </NativeSelect>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor={id("column")}>Matching column</FieldLabel>
+              <NativeSelect
+                id={id("column")}
+                className="w-full"
+                value={l.matchColumn}
+                onChange={(e) => patch({ matchColumn: e.target.value })}
+                disabled={!dataset}
+              >
+                {(dataset?.columns ?? []).map((c) => (
+                  <NativeSelectOption key={c.key} value={c.key}>
+                    {c.label}
+                    {c.key === dataset?.keyColumn ? " (key)" : ""}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+              <FieldDescription>Case and spaces are ignored.</FieldDescription>
+            </Field>
+          </div>
+          <Field>
+            <FieldLabel htmlFor={id("hint")}>Input hint (optional)</FieldLabel>
+            <Input
+              id={id("hint")}
+              value={l.inputHint ?? ""}
+              onChange={(e) => patch({ inputHint: e.target.value || null })}
+              placeholder={sampleValue ? `e.g. ${sampleValue}` : "e.g. 23013"}
+              maxLength={80}
+            />
+          </Field>
+          <Field orientation="horizontal">
+            <Switch
+              id={id("once")}
+              checked={l.oneTicketPerRow}
+              onCheckedChange={(on) => patch({ oneTicketPerRow: !!on })}
+            />
+            <FieldContent>
+              <FieldLabel htmlFor={id("once")}>One ticket per ID</FieldLabel>
+              <FieldDescription>A second booking with the same ID is refused, even if two people try at once.</FieldDescription>
+            </FieldContent>
+          </Field>
+          <Separator />
+          <Field orientation="horizontal">
+            <Switch
+              id={id("verify")}
+              checked={l.identityMethod === "EMAIL_OTP"}
+              onCheckedChange={(on) =>
+                patch({ identityMethod: on ? "EMAIL_OTP" : null, emailTemplate: on ? (l.emailTemplate ?? "{{value}}@") : null })
+              }
+            />
+            <FieldContent>
+              <FieldLabel htmlFor={id("verify")}>Confirm an email worked out from the ID</FieldLabel>
+              <FieldDescription>
+                The buyer can&apos;t choose the address: a one-time link goes to it, and the ticket is issued to it.
+              </FieldDescription>
+            </FieldContent>
+          </Field>
+          {l.identityMethod === "EMAIL_OTP" && (
+            <Field data-invalid={templateIssues.length > 0 || undefined}>
+              <FieldLabel htmlFor={id("template")}>Email template</FieldLabel>
+              <Input
+                id={id("template")}
+                value={l.emailTemplate ?? ""}
+                onChange={(e) => patch({ emailTemplate: e.target.value })}
+                placeholder="{{value}}@krmu.edu.in"
+                className="font-mono"
+                spellCheck={false}
+                maxLength={200}
+                aria-invalid={templateIssues.length > 0 || undefined}
+              />
+              <FieldDescription>
+                Use <code>{"{{value}}"}</code> for the matched ID (spaces removed), or <code>{"{{row.column}}"}</code> for another column
+                {dataset ? ` (${dataset.columns.map((c) => c.key).join(", ")})` : ""}. Filters:{" "}
+                <code>|lower</code> <code>|upper</code> <code>|trim</code> <code>|digits</code>.
+              </FieldDescription>
+              {templateIssues.length > 0 ? (
+                <p className="text-sm text-destructive">{templateIssues[0]}</p>
+              ) : example ? (
+                <p className="text-sm">
+                  For <span className="font-medium">{sampleValue}</span>: <span className="font-mono">{example}</span>
+                </p>
+              ) : null}
+            </Field>
+          )}
+        </FieldGroup>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -852,6 +1151,73 @@ function RadioCard({ id, value, title, description }: { id: string; value: strin
   );
 }
 
+/** Try a sample value against the real dataset (server-side; nothing is written). */
+function LookupTry({ eventId, step, dataset }: { eventId: string; step: FlowStep; dataset: BuilderDataset | undefined }) {
+  const [value, setValue] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<{ found: boolean; taken: boolean; email: string | null; templateError: string | null } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  if (!dataset || !step.lookup) return <p className="text-muted-foreground">Choose a list to try it.</p>;
+  async function check() {
+    setBusy(true);
+    setError(null);
+    setResult(null);
+    const res = await fetch(`/api/events/${eventId}/flow/lookup-preview`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ value, lookup: step.lookup }),
+    }).catch(() => null);
+    const body = await res?.json().catch(() => ({}));
+    setBusy(false);
+    if (!res?.ok) return setError(body?.error ?? "Couldn't check that.");
+    setResult(body);
+  }
+  return (
+    <div className="space-y-2">
+      <form
+        className="flex gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (value.trim()) void check();
+        }}
+      >
+        <Input
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          placeholder={step.lookup.inputHint || (dataset.sample?.[step.lookup.matchColumn] ? `e.g. ${dataset.sample[step.lookup.matchColumn]}` : "Try a value")}
+          aria-label="Sample value"
+          maxLength={100}
+        />
+        <Button type="submit" variant="outline" disabled={busy || !value.trim()}>
+          {busy && <Spinner data-icon="inline-start" />}
+          Check
+        </Button>
+      </form>
+      {error && <p className="text-destructive">{error}</p>}
+      {result &&
+        (result.templateError ? (
+          <p className="text-destructive">{result.templateError}</p>
+        ) : !result.found ? (
+          <p className="text-muted-foreground">Not in “{dataset.name}” — the buyer is told “We couldn&apos;t find {value} in the list.”</p>
+        ) : result.taken ? (
+          <p className="text-muted-foreground">In the list, but this ID already has a ticket — the buyer is refused.</p>
+        ) : (
+          <p>
+            <CheckCircle2Icon className="mr-1 inline size-4 text-primary" />
+            Match.
+            {result.email && (
+              <>
+                {" "}
+                The link goes to <span className="font-mono">{result.email}</span> (the buyer sees{" "}
+                <span className="font-mono">{maskEmail(result.email)}</span>).
+              </>
+            )}
+          </p>
+        ))}
+    </div>
+  );
+}
+
 /* ── Try it as a buyer ──────────────────────────────────────────────────── */
 
 function BuyerPreview({
@@ -859,17 +1225,21 @@ function BuyerPreview({
   questions,
   tickets,
   fields,
+  datasets,
 }: {
   eventId: string;
   questions: FlowStep[];
   tickets: BuilderTicket[];
   fields: CheckoutField[];
+  datasets: BuilderDataset[];
 }) {
   const [picked, setPicked] = useState<Record<string, string>>({});
 
   // Default each question to its first answer so the preview always shows a path.
+  // An ID check counts as answered: the preview shows what happens on a match.
   const answers = Object.fromEntries(
     questions.map((q) => {
+      if (q.kind === "LOOKUP") return [q.id, "preview"];
       const options = q.options ?? [];
       const chosen = options.find((o) => o.value === picked[q.id]) ?? options[0];
       return [q.id, chosen?.value ?? ""];
@@ -913,6 +1283,7 @@ function BuyerPreview({
     .map((q) => (q.options ?? []).find((o) => o.value === answers[q.id]))
     .filter((o): o is FlowOption => !!o);
   const identity = offer.identity.method;
+  const identityLookup = questions.find((q) => q.kind === "LOOKUP" && q.lookup?.identityMethod === "EMAIL_OTP");
   const domain = [...chosenAnswers].reverse().find((o) => o.identity?.method && o.identity.method !== "NONE")?.identity;
   const showFields = (() => {
     let ids: string[] | null = null;
@@ -934,7 +1305,15 @@ function BuyerPreview({
       </CardHeader>
       <CardContent className="space-y-4 text-sm">
         <ol className="space-y-4">
-          {questions.map((q) => (
+          {questions.map((q) =>
+            q.kind === "LOOKUP" ? (
+              <li key={q.id} className="space-y-2">
+                <p className="font-medium">
+                  {n()}. {q.title || "Untitled ID check"}
+                </p>
+                <LookupTry eventId={eventId} step={q} dataset={datasets.find((d) => d.id === q.lookup?.datasetId)} />
+              </li>
+            ) : (
             <li key={q.id} className="space-y-2">
               <p className="font-medium">
                 {n()}. {q.title || "Untitled question"}
@@ -953,14 +1332,17 @@ function BuyerPreview({
                 ))}
               </ToggleGroup>
             </li>
-          ))}
+            ),
+          )}
 
           {identity !== "NONE" && (
             <li className="flex gap-2">
               <MailCheckIcon className="mt-0.5 size-4 shrink-0 text-primary" />
               <p>
                 <span className="font-medium">{n()}. </span>
-                {identity === "GOOGLE"
+                {identityLookup
+                  ? "Confirms the email worked out from their ID with a one-time link — they can't change it."
+                  : identity === "GOOGLE"
                   ? `Signs in with Google${domain?.allowedEmailDomains?.length ? ` using an @${domain.allowedEmailDomains.join(" / @")} account` : ""}.`
                   : `Confirms their email with a one-time link${domain?.emailDomain ? ` — must end in @${domain.emailDomain}` : ""}.`}
               </p>

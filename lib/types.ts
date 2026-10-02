@@ -244,6 +244,11 @@ export interface Order {
   flowBranch?: string | null;
   identityMethod?: CheckoutIdentityMethod | null;
   customFields?: OrderCustomField[] | null;
+  /**
+   * Dataset rows matched by lookup questions: the normalised key only, never
+   * the row. `claim` = this order holds the row's one-ticket claim.
+   */
+  lookupKeys?: { stepId: string; datasetId: string; key: string; claim: boolean }[] | null;
   /** Captured at the top of the funnel, so a QR-code poster is attributable. */
   utm?: { source: string | null; medium: string | null; campaign: string | null } | null;
   /**
@@ -320,6 +325,8 @@ export interface Ticket {
    */
   flowBranch?: string | null;
   flowVersion?: number | null;
+  /** The dataset key this ticket was booked under (first lookup question), for attendees and insights. */
+  lookupKey?: string | null;
 }
 
 export interface WebhookRecord {
@@ -442,7 +449,27 @@ export type FlowStepKind =
   /** Seat count, skipped when the branch sets `quantityEditable: false`. */
   | "QUANTITY"
   /** Static copy. Never gates anything. */
-  | "INFO";
+  | "INFO"
+  /**
+   * Ask for a value (e.g. a roll number) and check it exists in one of the
+   * organisation's datasets. Optionally derives the email to verify from a
+   * template, and allows one ticket per matched row. Not a branch.
+   */
+  | "LOOKUP";
+
+export interface FlowLookup {
+  datasetId: string;
+  /** Dataset column key the answer is matched against (case and spaces ignored). */
+  matchColumn: string;
+  /** Placeholder in the input, e.g. "e.g. 23013". */
+  inputHint?: string | null;
+  /** e.g. "{{value}}@krmu.edu.in" — see lib/template-rules. Null = no derived email. */
+  emailTemplate?: string | null;
+  /** EMAIL_OTP: the derived address must be verified with a one-time link. */
+  identityMethod?: "EMAIL_OTP" | null;
+  /** At most one ticket per matched row, for this event. */
+  oneTicketPerRow: boolean;
+}
 
 export interface FlowStep {
   id: string;
@@ -451,6 +478,8 @@ export interface FlowStep {
   description?: string | null;
   required?: boolean;
   options?: FlowOption[] | null;
+  /** LOOKUP steps only. */
+  lookup?: FlowLookup | null;
 }
 
 export interface CheckoutFlow {
@@ -531,8 +560,10 @@ export interface CheckoutSession {
   eventId: string;
   flowVersion: number;
   status: "IN_PROGRESS" | "IDENTITY_VERIFIED" | "COMPLETED" | "EXPIRED";
-  /** stepId -> chosen option value. */
+  /** stepId -> chosen option value (for LOOKUP: the value as typed, once it matched). */
   answers: Record<string, string>;
+  /** LOOKUP stepId -> the matched row's normalised key and derived email. Set only server-side. */
+  lookups?: Record<string, { datasetId: string; key: string; derivedEmail: string | null }> | null;
   branch: { stepId: string; optionId: string; value: string } | null;
   identity: {
     method: CheckoutIdentityMethod;

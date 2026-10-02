@@ -140,6 +140,9 @@ export async function ensureIndexes(): Promise<void> {
     db.collection("datasets").createIndex({ organizationId: 1, name: 1 }),
     db.collection("datasetRows").createIndex({ datasetId: 1, keyNormalised: 1 }, { unique: true }),
     db.collection("datasetRows").createIndex({ organizationId: 1 }),
+    // One ticket per dataset row per event (lookup questions); see lib/lookups.
+    db.collection("datasetClaims").createIndex({ datasetId: 1, key: 1, eventId: 1 }, { unique: true }),
+    db.collection("datasetClaims").createIndex({ orderId: 1 }),
     db.collection("rateLimits").createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
     db.collection("invoices").createIndex({ number: 1 }, { unique: true }),
     db.collection("invoices").createIndex({ orderId: 1, kind: 1 }, { unique: true }),

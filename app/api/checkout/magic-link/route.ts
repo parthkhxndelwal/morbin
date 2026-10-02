@@ -15,6 +15,7 @@ import {
 import { getDb, toObjectId } from "@/lib/db";
 import { appUrl } from "@/lib/email";
 import { emailMatchesIdentity, getActiveFlow } from "@/lib/flows";
+import { lookupIdentityStep } from "@/lib/flow-rules";
 import type { CheckoutFlow, EmailRecord, Event, FlowOption, FlowStep } from "@/lib/types";
 
 /**
@@ -27,7 +28,8 @@ import type { CheckoutFlow, EmailRecord, Event, FlowOption, FlowStep } from "@/l
  */
 
 const requestSchema = z.object({
-  email: z.string().email().max(200),
+  // Optional only when a lookup question derived the address.
+  email: z.string().email().max(200).optional(),
 });
 
 /** Never say anything that distinguishes these cases. */
@@ -54,23 +56,33 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: GENERIC }, { status: 202 });
   }
 
-  const parsed = requestSchema.safeParse(await request.json().catch(() => null));
+  const parsed = requestSchema.safeParse(await request.json().catch(() => ({})));
   if (!parsed.success) {
     return NextResponse.json({ message: GENERIC }, { status: 202 });
   }
-  const email = parsed.data.email.toLowerCase();
 
+  // A lookup that derives the address decides it: whatever the client sends is
+  // ignored, so the link can only ever go to the address the dataset row implies.
+  const lookupStep = lookupIdentityStep(await getActiveFlow(session.eventId));
   const option = await identityOption(session.eventId, session.branch?.value ?? null);
-  const method = option?.identity?.method ?? session.identity.method;
-
-  if (method !== "EMAIL_OTP") {
-    return NextResponse.json({ message: GENERIC }, { status: 202 });
-  }
-  // Domain check lives here, on the server. A crafted request cannot talk its way
-  // past it, and a `403` would leak which addresses the organizer accepts — so
-  // an ineligible address simply receives nothing.
-  if (!emailMatchesIdentity(option?.identity ?? null, email)) {
-    return NextResponse.json({ message: GENERIC }, { status: 202 });
+  let email: string;
+  if (lookupStep) {
+    const derived = session.lookups?.[lookupStep.id]?.derivedEmail;
+    if (!derived) return NextResponse.json({ message: GENERIC }, { status: 202 });
+    email = derived;
+  } else {
+    if (!parsed.data.email) return NextResponse.json({ message: GENERIC }, { status: 202 });
+    email = parsed.data.email.toLowerCase();
+    const method = option?.identity?.method ?? session.identity.method;
+    if (method !== "EMAIL_OTP") {
+      return NextResponse.json({ message: GENERIC }, { status: 202 });
+    }
+    // Domain check lives here, on the server. A crafted request cannot talk its way
+    // past it, and a `403` would leak which addresses the organizer accepts — so
+    // an ineligible address simply receives nothing.
+    if (!emailMatchesIdentity(option?.identity ?? null, email)) {
+      return NextResponse.json({ message: GENERIC }, { status: 202 });
+    }
   }
 
   // Respect the branch's own seat allowance before spending an email send.

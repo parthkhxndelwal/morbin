@@ -208,13 +208,15 @@ export function resolveOffer(input: ResolveOfferInput): Offer {
       // Only questions can be answered. IDENTITY and QUANTITY are consequences
       // of the answer already chosen, and INFO has nothing to answer — counting
       // it as required used to leave buyers stuck on a screen with no buttons.
-      if (s.kind !== "SINGLE_CHOICE") return false;
+      if (s.kind !== "SINGLE_CHOICE" && s.kind !== "LOOKUP") return false;
       return !answers[s.id];
     })
     .map((s) => s.id);
 
   const policy = resolveBranch(flow, answers);
-  const method = policy?.identity?.method ?? identity.method;
+  // A lookup that derives the address to verify wins over any branch identity:
+  // the buyer doesn't get to choose which email proves the row is theirs.
+  const method = lookupIdentityStep(flow) ? "EMAIL_OTP" : (policy?.identity?.method ?? identity.method);
 
   // Which types this audience is allowed to see at all.
   let candidates = ticketTypes;
@@ -241,7 +243,11 @@ export function resolveOffer(input: ResolveOfferInput): Offer {
   });
 
   const quantityEditable = policy?.quantityEditable !== false;
-  const branchCap = policy?.maxPerOrder ?? null;
+  // "One ticket per row" caps every order at one ticket; the row claim taken
+  // when the order is created stops a second order using the same row.
+  const lookupCap = flow.steps.some((s) => s.kind === "LOOKUP" && s.lookup?.oneTicketPerRow) ? 1 : null;
+  const caps = [policy?.maxPerOrder ?? null, lookupCap].filter((c): c is number => c !== null);
+  const branchCap = caps.length ? Math.min(...caps) : null;
   const typeCap = (t: TicketType) =>
     typeof t.defaultMaxPerOrder === "number" ? t.defaultMaxPerOrder : MAX_PER_TYPE_PER_ORDER;
 
@@ -323,4 +329,16 @@ export function visibleFieldIds(
   const policy = resolveBranch(flow, answers);
   if (!policy?.showFieldIds) return allFieldIds;
   return policy.showFieldIds;
+}
+
+/** The LOOKUP steps of a flow, in order. */
+export function lookupSteps(flow: Pick<CheckoutFlow, "steps">): FlowStep[] {
+  return flow.steps.filter((s) => s.kind === "LOOKUP" && !!s.lookup);
+}
+
+/** The lookup whose derived email must be verified, if any (the first one wins). */
+export function lookupIdentityStep(flow: Pick<CheckoutFlow, "steps">): FlowStep | null {
+  return (
+    lookupSteps(flow).find((s) => s.lookup!.identityMethod === "EMAIL_OTP" && !!s.lookup!.emailTemplate) ?? null
+  );
 }

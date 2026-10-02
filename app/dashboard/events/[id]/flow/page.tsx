@@ -1,5 +1,6 @@
 import { NoAccessState } from "@/components/patterns/states";
 import { getBranding } from "@/lib/branding";
+import { datasetsForBuilder } from "@/lib/datasets";
 import { getTicketTypes } from "@/lib/events";
 import { getActiveFlow, getFlowDraft, MAX_PER_TYPE_PER_ORDER } from "@/lib/flows";
 import { requireEventAccess } from "@/lib/event-access";
@@ -24,11 +25,12 @@ export default async function FlowBuilderPage({ params }: { params: Promise<{ id
     return <NoAccessState description="Only the organisation owner can change who can book." />;
   }
 
-  const [ticketTypes, branding, published, draft] = await Promise.all([
+  const [ticketTypes, branding, published, draft, datasets] = await Promise.all([
     getTicketTypes(eventId),
     getBranding(eventId),
     getActiveFlow(eventId),
     getFlowDraft(eventId),
+    datasetsForBuilder(org._id.toString()),
   ]);
 
   return (
@@ -54,6 +56,8 @@ export default async function FlowBuilderPage({ params }: { params: Promise<{ id
       published={{ version: published.version, steps: published.steps }}
       draft={draft ? { steps: draft.steps } : null}
       eventStatus={event.status}
+      datasets={datasets.map((d) => ({ id: d.id, name: d.name, columns: d.columns, keyColumn: d.keyColumn, sample: d.sample }))}
+      datasetsHref={support ? `/dashboard/admin/orgs/${org._id.toString()}/datasets` : "/dashboard/datasets"}
       maxPerType={MAX_PER_TYPE_PER_ORDER}
       proposeOnly={support && supportNeedsApproval(org)}
     />

@@ -4,6 +4,7 @@ import { auth } from "@/lib/auth";
 import {
   CHECKOUT_COOKIE,
   RESUME_TTL_MS,
+  answerLookup,
   answerStep,
   branchClaimedUnitsFor,
   claimedUnitsFor,
@@ -18,6 +19,10 @@ import { getBranding } from "@/lib/branding";
 import { getDb, toObjectId } from "@/lib/db";
 import { getTicketTypes } from "@/lib/events";
 import { emailMatchesIdentity, getActiveFlow, resolveOffer } from "@/lib/flows";
+import { lookupIdentityStep } from "@/lib/flow-rules";
+import { matchLookup } from "@/lib/lookups";
+import { clientIp, rateLimit } from "@/lib/rate-limit";
+import { maskEmail } from "@/lib/template-rules";
 import { getPlatformSettings, pricingPolicyFor } from "@/lib/platform-settings";
 import { computePricing } from "@/lib/pricing";
 import type { CheckoutFlow, Event, FlowOption, FlowStep, Organization, TicketType } from "@/lib/types";
@@ -32,6 +37,23 @@ import type { CheckoutFlow, Event, FlowOption, FlowStep, Organization, TicketTyp
  */
 
 const MAX_TEXT = 200;
+
+/** Lookup attempts, so the endpoint can't be used to enumerate a dataset. */
+const LOOKUP_WINDOW_MS = 10 * 60 * 1000;
+const LOOKUPS_PER_SESSION = 10;
+const LOOKUPS_PER_IP = 40;
+
+/**
+ * The flow as the drawer sees it. A lookup step exposes only its wording and
+ * input hint — never which dataset, column or email template it uses.
+ */
+function publicSteps(steps: FlowStep[]) {
+  return steps.map((s) =>
+    s.kind === "LOOKUP"
+      ? { id: s.id, kind: s.kind, title: s.title, description: s.description ?? null, required: s.required, inputHint: s.lookup?.inputHint ?? null }
+      : s,
+  );
+}
 
 async function loadSessionFromCookie() {
   const jar = await cookies();
@@ -130,7 +152,7 @@ async function describe(session: NonNullable<Awaited<ReturnType<typeof getChecko
         orderTotalPaise: quote.orderTotalPaise,
       },
     },
-    flow: { version: flow.version, steps: flow.steps },
+    flow: { version: flow.version, steps: publicSteps(flow.steps) },
     answers: session.answers,
     branch: session.branch,
     identity: {
@@ -142,6 +164,14 @@ async function describe(session: NonNullable<Awaited<ReturnType<typeof getChecko
       email: session.identity.email,
       verified: !!session.identity.verifiedAt,
       via: session.identity.via,
+      // The address a lookup derived, masked until it's verified: the buyer
+      // sees where the link goes without the endpoint revealing the dataset.
+      lookupEmail: (() => {
+        const step = lookupIdentityStep(flow);
+        const derived = step ? session.lookups?.[step.id]?.derivedEmail : null;
+        if (!derived) return null;
+        return session.identity.verifiedAt && session.identity.email === derived ? derived : maskEmail(derived);
+      })(),
     },
     offer,
     branding: {
@@ -232,6 +262,39 @@ export async function PATCH(request: Request) {
     const flow: CheckoutFlow = await getActiveFlow(session.eventId);
     const step: FlowStep | undefined = flow.steps.find((s: FlowStep) => s.id === body.stepId);
     if (!step) return NextResponse.json({ error: "Unknown step" }, { status: 400 });
+    if (step.kind === "LOOKUP" && step.lookup) {
+      const [perSession, perIp] = await Promise.all([
+        rateLimit("lookup:session", session.publicId, LOOKUPS_PER_SESSION, LOOKUP_WINDOW_MS),
+        rateLimit("lookup:ip", await clientIp(), LOOKUPS_PER_IP, LOOKUP_WINDOW_MS),
+      ]);
+      if (!perSession || !perIp) {
+        return NextResponse.json({ error: "Too many attempts. Wait a few minutes and try again." }, { status: 429 });
+      }
+      const value = body.value.trim().slice(0, 100);
+      if (!value) return NextResponse.json({ error: "Enter a value to continue." }, { status: 400 });
+      const db = await getDb();
+      const event = await db
+        .collection<Event>("events")
+        .findOne({ _id: toObjectId(session.eventId) as never }, { projection: { organizationId: 1 } });
+      if (!event) return NextResponse.json({ error: "This event is not available" }, { status: 404 });
+      const match = await matchLookup(event.organizationId, session.eventId, step.lookup, value);
+      if (!match.ok) {
+        // Says what was typed, never anything from the dataset.
+        const error =
+          match.reason === "taken"
+            ? "This ID already has a ticket."
+            : match.reason === "no_email"
+              ? "We couldn't work out your email address from this ID. Please contact the organiser."
+              : `We couldn't find ${value} in the list.`;
+        return NextResponse.json({ error }, { status: match.reason === "taken" ? 409 : 422 });
+      }
+      await answerLookup(session.publicId, step.id, value, {
+        datasetId: step.lookup.datasetId,
+        key: match.key,
+        derivedEmail: match.derivedEmail,
+      });
+      return NextResponse.json(await describe((await getCheckoutSession(session.publicId))!));
+    }
     if (step.kind === "SINGLE_CHOICE") {
       // The answer must be one of the options the flow actually offers, so a
       // crafted request cannot invent an audience the organizer never defined.

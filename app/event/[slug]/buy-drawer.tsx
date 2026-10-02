@@ -30,11 +30,13 @@ interface OfferType {
 
 interface Step {
   id: string;
-  kind: "SINGLE_CHOICE" | "IDENTITY" | "QUANTITY" | "INFO";
+  kind: "SINGLE_CHOICE" | "IDENTITY" | "QUANTITY" | "INFO" | "LOOKUP";
   title: string;
   description?: string | null;
   required?: boolean;
   options?: { id: string; label: string; value: string }[] | null;
+  /** LOOKUP only. */
+  inputHint?: string | null;
 }
 
 interface CustomField {
@@ -51,7 +53,14 @@ interface State {
   flow: { version: number; steps: Step[] };
   answers: Record<string, string>;
   branch: { stepId: string; optionId: string; value: string } | null;
-  identity: { method: string; email: string | null; verified: boolean; via: string | null };
+  identity: {
+    method: string;
+    email: string | null;
+    verified: boolean;
+    via: string | null;
+    /** Set when an ID check derived the address: masked until verified. */
+    lookupEmail: string | null;
+  };
   offer: {
     ticketTypes: OfferType[];
     quantityRequired: boolean;
@@ -298,7 +307,8 @@ export function BuyDrawer({
     const res = await fetch("/api/checkout/magic-link", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: address }),
+      // With an ID-derived address the server decides where the link goes.
+      body: JSON.stringify(address ? { email: address } : {}),
     });
     const body = await res.json().catch(() => ({}));
     // 202 either way: the response never reveals whether the address qualifies.
@@ -634,6 +644,9 @@ function QuestionScreen({
   const nextStepId = state.offer.missingRequiredSteps[0];
   const step = state.flow.steps.find((s) => s.id === nextStepId);
   if (!step) return <p className="mt-6 text-sm text-neutral-400">Loading…</p>;
+  if (step.kind === "LOOKUP") {
+    return <LookupScreen key={step.id} state={state} step={step} onAnswer={onAnswer} />;
+  }
 
   return (
     <div className="mt-5">
@@ -660,6 +673,56 @@ function QuestionScreen({
   );
 }
 
+/** "Enter your roll number": checked on the server, which only ever says match or not. */
+function LookupScreen({
+  state,
+  step,
+  onAnswer,
+}: {
+  state: State;
+  step: Step;
+  onAnswer: (stepId: string, value: string) => Promise<void> | void;
+}) {
+  const [value, setValue] = useState(state.answers[step.id] ?? "");
+  const [busy, setBusy] = useState(false);
+  return (
+    <form
+      className="mt-5"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        if (!value.trim() || busy) return;
+        setBusy(true);
+        await onAnswer(step.id, value.trim());
+        setBusy(false);
+      }}
+    >
+      <p className="text-xs font-bold uppercase tracking-widest text-neutral-500">
+        Step {state.flow.steps.findIndex((s) => s.id === step.id) + 1}
+      </p>
+      <label htmlFor={`lookup-${step.id}`} className="mt-1.5 block text-base font-semibold">
+        {step.title}
+      </label>
+      {step.description && <p className="mt-1 text-sm text-neutral-400">{step.description}</p>}
+      <input
+        id={`lookup-${step.id}`}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        placeholder={step.inputHint ?? undefined}
+        autoComplete="off"
+        maxLength={100}
+        className="mt-4 w-full rounded-xl border border-white/15 bg-white/5 px-4 py-3 text-sm outline-none placeholder:text-neutral-500"
+      />
+      <button
+        type="submit"
+        disabled={busy || !value.trim()}
+        className="mt-3 w-full rounded-full bg-white px-5 py-3.5 text-sm font-bold text-neutral-950 disabled:opacity-50"
+      >
+        {busy ? "Checking…" : "Continue"}
+      </button>
+    </form>
+  );
+}
+
 function IdentityScreen({
   state,
   email,
@@ -682,6 +745,30 @@ function IdentityScreen({
   googleAvailable: boolean;
 }) {
   const wantsGoogle = state.identity.method === "GOOGLE";
+  const derived = state.identity.lookupEmail;
+  if (derived) {
+    return (
+      <div className="mt-5">
+        <h3 className="text-base font-semibold">Confirm it&apos;s you</h3>
+        <p className="mt-1 text-sm text-neutral-400">
+          We&apos;ll send a one-time link to <span className="font-semibold text-white">{derived}</span>, the address
+          on file for your ID. Your ticket goes there too.
+        </p>
+        <button
+          onClick={() => onRequestLink("")}
+          disabled={busy || resendIn > 0}
+          className="mt-4 w-full rounded-full bg-white px-5 py-3.5 text-sm font-bold text-neutral-950 disabled:opacity-50"
+        >
+          {linkSent && resendIn > 0 ? `Resend in ${resendIn}s` : linkSent ? "Resend the link" : "Send me the link"}
+        </button>
+        {linkSent && (
+          <p className="mt-3 text-center text-xs text-neutral-400">
+            Check your inbox. The link works once and expires in 15 minutes.
+          </p>
+        )}
+      </div>
+    );
+  }
   return (
     <div className="mt-5">
       <h3 className="text-base font-semibold">Confirm it&apos;s you</h3>
