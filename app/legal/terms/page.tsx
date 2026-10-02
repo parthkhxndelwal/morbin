@@ -59,6 +59,7 @@ export default function TermsPage() {
       <LegalFooter
         links={[
           { href: "/", label: "Home" },
+          { href: "/apply", label: "List your event" },
           { href: "/legal/privacy", label: "Privacy Policy" },
         ]}
       />

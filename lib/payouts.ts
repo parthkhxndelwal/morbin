@@ -3,6 +3,7 @@ import { audit, notify } from "@/lib/audit";
 import { getDb, safeObjectIds, toObjectId } from "@/lib/db";
 import { storeDocument, toCsv } from "@/lib/documents";
 import { formatINR } from "@/lib/format";
+import { issueOrgFeeInvoice } from "@/lib/invoices";
 import { appendLedger, unsettledTotals } from "@/lib/ledger";
 import { lockOrgBalance, TxAbort, withTransaction } from "@/lib/tx";
 import type { LedgerEntry, Order, Payout, PayoutMessage, PayoutTotals } from "@/lib/types";
@@ -220,6 +221,13 @@ export async function markPayoutPaid(input: {
     organizationId: payout.organizationId,
     meta: { netPaise: payout.totals.netPaise, bankReference: input.bankReference.trim() },
   });
+  // The payout is paid whatever happens here; a failed invoice is retried from
+  // the admin payout page ("Issue fee invoice").
+  try {
+    await issueOrgFeeInvoice(input.id);
+  } catch (error) {
+    console.error("[payouts] fee invoice failed", input.id, error);
+  }
   await notify({
     organizationId: payout.organizationId,
     audience: "ORG_OWNER",
@@ -228,7 +236,7 @@ export async function markPayoutPaid(input: {
     body: "Review the statement and acknowledge it, or raise a query.",
     link: `/dashboard/payouts/${input.id}`,
   });
-  return updated;
+  return (await db.collection<Payout>("payouts").findOne({ _id: payout._id })) ?? updated;
 }
 
 export async function acknowledgePayout(organizationId: string, id: string, userId: string): Promise<void> {

@@ -61,12 +61,24 @@ export default function Home() {
           <div className="mt-6 w-full max-w-md [@media(max-height:700px)]:mt-4">
             <EarlyAccessForm compact />
           </div>
+          <p className="mt-4 text-sm text-neutral-400">
+            Running events?{" "}
+            <Link href="/apply" className="font-semibold text-white underline underline-offset-4 hover:text-violet-200">
+              List your event
+            </Link>
+          </p>
         </div>
       </main>
 
       <footer className="relative z-10 mx-auto flex w-full max-w-7xl shrink-0 flex-col gap-1.5 px-6 pb-5 text-xs text-neutral-500 sm:flex-row sm:items-center sm:justify-between sm:px-10 sm:pb-7">
         <p>© 2026 Morbin. All rights reserved.</p>
-        <div className="flex gap-5">
+        <div className="flex flex-wrap gap-x-5 gap-y-1">
+          <Link href="/apply" className="transition-colors hover:text-neutral-300">
+            List your event
+          </Link>
+          <Link href="/docs" className="transition-colors hover:text-neutral-300">
+            Docs
+          </Link>
           <Link href="/legal/privacy" className="transition-colors hover:text-neutral-300">
             Privacy Policy
           </Link>

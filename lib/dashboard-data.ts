@@ -347,6 +347,8 @@ export interface RefundRow {
   createdAt: string;
   decidedAt: string | null;
   completedAt: string | null;
+  /** Admin → customer emails on this case (admin queue only; empty for owners). */
+  messages: import("@/lib/refund-messages").RefundMessageView[];
 }
 
 /** Refund cases for one organisation, or (orgId null) for the admin queue. */
@@ -370,7 +372,12 @@ export async function getRefundRows(orgId: string | null): Promise<RefundRow[]> 
   ]);
   const titles = new Map(events.map((e) => [e._id!.toString(), e.title]));
   const orgNames = new Map(orgs.map((o) => [o._id.toString(), o.name as string]));
+  // The customer correspondence is Morbin's; organisations don't see it.
+  const threads = orgId
+    ? new Map()
+    : await (await import("@/lib/refund-messages")).refundThreads(cases.map((c) => c._id!.toString()));
   return cases.map((c) => ({
+    messages: threads.get(c._id!.toString()) ?? [],
     id: c._id!.toString(),
     organizationId: c.organizationId,
     organizationName: orgNames.get(c.organizationId) ?? null,
@@ -446,6 +453,7 @@ export interface PayoutDetail extends PayoutRow {
   note: string | null;
   statementDocId: string | null;
   breakdownDocId: string | null;
+  invoiceDocId: string | null;
   acknowledgedAt: string | null;
   messages: { id: string; authorRole: "OWNER" | "ADMIN"; message: string; createdAt: string }[];
 }
@@ -482,6 +490,7 @@ export async function getPayoutDetail(id: string, orgId: string | null): Promise
     note: p.note,
     statementDocId: p.statementDocId,
     breakdownDocId: p.breakdownDocId,
+    invoiceDocId: p.invoiceDocId ?? null,
     acknowledgedAt: p.acknowledgedAt?.toISOString() ?? null,
     messages: messages.map((m) => ({
       id: m._id!.toString(),
