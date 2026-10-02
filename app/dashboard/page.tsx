@@ -1,125 +1,100 @@
 import Link from "next/link";
-import { getDb } from "@/lib/db";
-import { getOrgEvents } from "@/lib/events";
+import { CalendarDaysIcon, IndianRupeeIcon, ScanLineIcon, TicketIcon } from "lucide-react";
+import { NewEventButton } from "@/components/features/events/new-event-button";
+import { OrdersTable } from "@/components/features/orders/orders-table";
+import { SalesChart } from "@/components/features/overview/sales-chart";
+import { PageHeader } from "@/components/patterns/page-header";
+import { StatCard, StatGrid } from "@/components/patterns/stat-card";
+import { StatusBadge } from "@/components/patterns/status-badge";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { getOrgOrderRows, getOrgOverview } from "@/lib/dashboard-data";
+import { formatCount, formatINR } from "@/lib/format";
 import { requireOrgSession } from "@/lib/guards";
-import type { Order } from "@/lib/types";
+import { can, capabilitySummary, memberLabel } from "@/lib/permissions";
+
+export const metadata = { title: "Overview" };
 
 export default async function DashboardPage() {
-  const { org } = await requireOrgSession();
+  const { org, role } = await requireOrgSession();
   const orgId = org._id.toString();
-
-  const db = await getDb();
-  const [events, stats, recentOrders] = await Promise.all([
-    getOrgEvents(orgId),
-    db
-      .collection<Order>("orders")
-      .aggregate<{
-        revenue: number;
-        ticketsSold: number;
-        count: number;
-      }>([
-        { $match: { organizationId: orgId, status: "PAID" } },
-        {
-          $group: {
-            _id: null,
-            revenue: { $sum: "$totalPaise" },
-            ticketsSold: { $sum: { $sum: "$items.quantity" } },
-            count: { $sum: 1 },
-          },
-        },
-      ])
-      .toArray(),
-    db
-      .collection<Order>("orders")
-      .find({ organizationId: orgId, status: "PAID" })
-      .sort({ paidAt: -1 })
-      .limit(8)
-      .toArray(),
+  const canManage = can(role, "manageEvents");
+  const [overview, recentOrders] = await Promise.all([
+    getOrgOverview(orgId),
+    getOrgOrderRows(orgId, { limit: 8, statuses: ["PAID", "REFUNDED"] }),
   ]);
-  const revenue = stats[0]?.revenue ?? 0;
-  const ticketsSold = stats[0]?.ticketsSold ?? 0;
+  const checkinRate =
+    overview.ticketsIssued > 0 ? Math.round((overview.checkedIn / overview.ticketsIssued) * 100) : 0;
 
   return (
-    <div>
-      <h1 className="text-2xl font-bold tracking-tight">{org.name}</h1>
-      <p className="mt-1 text-sm text-neutral-400">
-        Payment status:{" "}
-        <span
-          className={
-            org.paymentAccountStatus === "VERIFIED" ? "text-emerald-300" : "text-amber-300"
-          }
-        >
-          {org.paymentAccountStatus}
-        </span>
-        {org.paymentAccountStatus !== "VERIFIED" && (
+    <div className="space-y-6">
+      <PageHeader
+        title={org.name}
+        meta={<StatusBadge kind="paymentAccount" value={org.paymentAccountStatus} />}
+        description={
+          canManage
+            ? "Sales, tickets and check-ins across all your events."
+            : `${memberLabel(org.type ?? "EVENT")} access — ${capabilitySummary(role)}`
+        }
+        actions={
           <>
-            {" · "}
-            <span className="text-neutral-500">
-              awaiting approval — paid events unlock once you&apos;re verified
-            </span>
+            <Button variant="outline" render={<Link href="/dashboard/scan" />} nativeButton={false}>
+              <ScanLineIcon data-icon="inline-start" />
+              Check-in desk
+            </Button>
+            {canManage && <NewEventButton />}
           </>
-        )}
-      </p>
-      <div className="mt-6 grid gap-4 sm:grid-cols-3">
-        {[
-          ["Revenue", `₹${(revenue / 100).toFixed(0)}`],
-          ["Tickets sold", String(ticketsSold)],
-          ["Events", String(events.length)],
-        ].map(([label, value]) => (
-          <div key={label} className="rounded-2xl border border-white/10 bg-white/5 p-5">
-            <p className="text-xs uppercase tracking-widest text-neutral-400">{label}</p>
-            <p className="mt-1 text-2xl font-bold">{value}</p>
-          </div>
-        ))}
-      </div>
-      <div className="mt-6 flex gap-3">
-        <Link
-          href="/dashboard/events"
-          className="rounded-full bg-white px-5 py-2.5 text-sm font-bold text-neutral-950 hover:bg-violet-200"
-        >
-          Manage events
-        </Link>
-        <Link
-          href="/dashboard/scan"
-          className="rounded-full border border-white/15 px-5 py-2.5 text-sm font-semibold hover:bg-white/10"
-        >
-          Check-in desk
-        </Link>
-      </div>
-      <h2 className="mt-10 text-sm font-bold uppercase tracking-widest text-neutral-400">
-        Recent orders
-      </h2>
-      <div className="mt-3 overflow-x-auto rounded-2xl border border-white/10">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-white/10 text-left text-neutral-400">
-              <th className="px-4 py-3 font-medium">Buyer</th>
-              <th className="px-4 py-3 font-medium">Tickets</th>
-              <th className="px-4 py-3 font-medium">Amount</th>
-              <th className="px-4 py-3 font-medium">Transfer</th>
-            </tr>
-          </thead>
-          <tbody>
-            {recentOrders.map((o) => (
-              <tr key={o._id!.toString()} className="border-b border-white/5 last:border-0">
-                <td className="px-4 py-3">{o.buyerName}</td>
-                <td className="px-4 py-3 text-neutral-400">
-                  {o.items.reduce((s, i) => s + i.quantity, 0)}
-                </td>
-                <td className="px-4 py-3">₹{(o.totalPaise / 100).toFixed(0)}</td>
-                <td className="px-4 py-3 text-neutral-400">{o.transferStatus ?? "—"}</td>
-              </tr>
-            ))}
-            {recentOrders.length === 0 && (
-              <tr>
-                <td colSpan={4} className="px-4 py-6 text-center text-neutral-500">
-                  No orders yet.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+        }
+      />
+
+      {org.paymentAccountStatus !== "VERIFIED" && (
+        <Alert>
+          <IndianRupeeIcon />
+          <AlertTitle>Paid tickets unlock after verification</AlertTitle>
+          <AlertDescription>
+            Morbin is reviewing your organisation. You can create events and sell free tickets
+            meanwhile.
+          </AlertDescription>
+        </Alert>
+      )}
+
+      <StatGrid>
+        <StatCard
+          label="Ticket sales"
+          value={formatINR(overview.grossPaise)}
+          hint={`${formatCount(overview.paidOrders)} paid orders`}
+          icon={<IndianRupeeIcon />}
+        />
+        <StatCard
+          label="Tickets issued"
+          value={formatCount(overview.ticketsIssued)}
+          icon={<TicketIcon />}
+        />
+        <StatCard
+          label="Checked in"
+          value={`${checkinRate}%`}
+          hint={`${formatCount(overview.checkedIn)} of ${formatCount(overview.ticketsIssued)}`}
+          icon={<ScanLineIcon />}
+        />
+        <StatCard
+          label="Upcoming events"
+          value={formatCount(overview.upcomingEvents)}
+          icon={<CalendarDaysIcon />}
+        />
+      </StatGrid>
+
+      <SalesChart data={overview.dailySales} />
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Recent orders</CardTitle>
+          <CardDescription>The latest paid and refunded orders across your events.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <OrdersTable rows={recentOrders} compact />
+        </CardContent>
+      </Card>
     </div>
   );
 }
