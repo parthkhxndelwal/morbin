@@ -6,6 +6,7 @@ import {
   EyeIcon,
   FileUpIcon,
   MessageSquareReplyIcon,
+  ReceiptTextIcon,
   SendIcon,
   XIcon,
 } from "lucide-react";
@@ -33,6 +34,7 @@ import type { PayoutTotals } from "@/lib/types";
 import {
   cancelPayoutAction,
   issuePayoutAction,
+  issueFeeInvoiceAction,
   markPayoutPaidAction,
   previewPayoutAction,
   replaceStatementAction,
@@ -377,6 +379,20 @@ export function AdminPayoutActions({ payout }: { payout: PayoutDetail }) {
   }
   return (
     <>
+      {payout.totals.feesPaise !== 0 && !payout.invoiceDocId && (
+        <ConfirmAction
+          trigger={
+            <Button variant="outline">
+              <ReceiptTextIcon data-icon="inline-start" />
+              Issue fee invoice
+            </Button>
+          }
+          title="Issue the platform fee invoice?"
+          description="Uses the next invoice number and Morbin's current GST details. Do this once Admin → Settings is complete."
+          confirmLabel="Issue invoice"
+          action={() => issueFeeInvoiceAction(payout.id)}
+        />
+      )}
       <FormDialog
         trigger={
           <Button variant="outline">

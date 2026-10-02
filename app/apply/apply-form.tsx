@@ -137,11 +137,14 @@ export function ApplyForm() {
         <Field orientation="horizontal" {...f("consent")}>
           <Checkbox id="ap-consent" name="consent" value="on" />
           <FieldLabel htmlFor="ap-consent" className="leading-snug font-normal">
-            Morbin may use these details to review this application and contact me about it. See the{" "}
-            <Link href="/legal/privacy" className="underline">
-              privacy policy
-            </Link>
-            .
+            {/* One inline run of text: FieldLabel is a flex row, which would split the link out. */}
+            <span>
+              Morbin may use these details to review this application and contact me about it. See the{" "}
+              <Link href="/legal/privacy" className="underline">
+                privacy policy
+              </Link>
+              .
+            </span>
           </FieldLabel>
         </Field>
         <FieldError>{errors.consent}</FieldError>

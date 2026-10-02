@@ -11,6 +11,7 @@ import {
   markSettledByOrg,
   rejectRefund,
 } from "@/lib/refunds";
+import { emailRefundCustomer, MAX_REFUND_MESSAGE } from "@/lib/refund-messages";
 import { err, ok, type Result } from "@/lib/result";
 import { TxAbort } from "@/lib/tx";
 
@@ -78,4 +79,11 @@ export async function completeManuallyAction(caseId: string, reference: string):
   if ("error" in a) return err(a.error!);
   if (reference.trim().length < 3) return err("Enter the bank transfer reference.");
   return run(() => completeRefundManually(caseId, a.admin.id, reference.trim().slice(0, 120)), "Marked as refunded");
+}
+
+/** Email the customer from a case; Reply-To is Morbin's support inbox. */
+export async function emailCustomerAction(caseId: string, message: string): Promise<Result> {
+  const a = await admin();
+  if ("error" in a) return err(a.error!);
+  return run(() => emailRefundCustomer(caseId, a.admin.id, message.slice(0, MAX_REFUND_MESSAGE + 1)), "Email queued to the customer");
 }
