@@ -9,7 +9,7 @@
     "lint": "eslint",
     "db:indexes": "node --experimental-strip-types scripts/ensure-indexes.ts",
     "db:migrate": "node --experimental-strip-types scripts/migrate-roles.ts",
-    "admin:bootstrap": "node --experimental-strip-types scripts/bootstrap-admin.ts",
+    "admin:bootstrap": "tsx --tsconfig scripts/tsconfig.checks.json --env-file-if-exists=.env.local scripts/bootstrap-admin.mts",
     "check:bootstrap": "node --experimental-strip-types lib/admin-bootstrap.check.mts",
     "check:delete-plan": "node --experimental-strip-types lib/admin-delete-plan.check.mts",
     "check:force-delete": "node scripts/check-force-delete.mjs",
