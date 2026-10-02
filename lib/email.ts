@@ -174,6 +174,34 @@ function refundHtml(m: {
   </div>`;
 }
 
+function teamHtml(m: {
+  kind: "TEAM_INVITE" | "TEAM_ADDED";
+  name: string;
+  organizationName: string;
+  inviterName: string;
+  link: string;
+}): string {
+  const invite = m.kind === "TEAM_INVITE";
+  return `<div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#111">
+    <h2 style="margin:0 0 16px">${invite ? `Join ${m.organizationName} on Morbin` : `You've been added to ${m.organizationName}`}</h2>
+    <p>Hi ${m.name},</p>
+    <p>${m.inviterName} ${invite ? "has invited you to" : "has added you to"} <strong>${m.organizationName}</strong> on Morbin,
+       where you can see its events and check tickets in at the door.</p>
+    ${
+      invite
+        ? `<p>Choose a password to set up your account. This link works once and expires in 7 days.</p>
+           ${emailButton(m.link, "Accept the invite")}
+           <p style="color:#777;font-size:12px;word-break:break-all">
+             If the button does not work, paste this into your browser:<br>${m.link}
+           </p>`
+        : `${emailButton(m.link, "Open the dashboard")}`
+    }
+    <p style="color:#777;font-size:12px">If you weren't expecting this, you can ignore this email${
+      invite ? " and no account will be created" : ""
+    }.</p>
+  </div>`;
+}
+
 /** Attempts before a delivery is given up as FAILED (≈ 1 + 2 + 4 + 8 + 16 min). */
 const MAX_ATTEMPTS = 6;
 /** A claim older than this is assumed abandoned (process crashed mid-send). */
@@ -249,6 +277,19 @@ export async function flushEmailQueue(limit = 20): Promise<{ sent: number; faile
           arn: meta.refundArn ? esc(meta.refundArn) : null,
           speed: meta.refundSpeed ?? "NORMAL",
         });
+      } else if (job.kind === "TEAM_INVITE" || job.kind === "TEAM_ADDED") {
+        const organizationName = meta.organizationName ?? "an organisation";
+        subject =
+          job.kind === "TEAM_INVITE"
+            ? `You're invited to join ${organizationName} on Morbin`
+            : `You've been added to ${organizationName} on Morbin`;
+        html = teamHtml({
+          kind: job.kind,
+          name: attendeeName,
+          organizationName: esc(organizationName),
+          inviterName: esc(meta.inviterName ?? "The owner"),
+          link: esc(meta.link ?? appUrl("/dashboard")),
+        });
       } else if (job.kind === "EVENT_UPDATE" && meta.ticketCode?.startsWith("cancelled:")) {
         subject = `Cancelled: ${meta.eventTitle ?? "your event"}`;
         html = `<div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#111">
@@ -272,6 +313,8 @@ export async function flushEmailQueue(limit = 20): Promise<{ sent: number; faile
             sentAt: new Date(),
             providerMessageId: r.dev ? "dev-skip" : (r.id ?? null),
             "meta.qrSvg": null,
+            // A join link is a credential; once delivered it has no reason to stay here.
+            "meta.link": null,
           },
           $inc: { attempts: 1 },
         },

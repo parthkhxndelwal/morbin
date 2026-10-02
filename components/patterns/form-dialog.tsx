@@ -37,8 +37,13 @@ export function FormDialog<T>({
   onSuccess,
   children,
   className,
+  open: controlledOpen,
+  onOpenChange,
 }: {
-  trigger: React.ReactElement;
+  /** Omit when controlled (e.g. opened from a dropdown menu item). */
+  trigger?: React.ReactElement;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   title: string;
   description?: React.ReactNode;
   submitLabel?: string;
@@ -50,7 +55,12 @@ export function FormDialog<T>({
   className?: string;
 }) {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const open = controlledOpen ?? uncontrolledOpen;
+  const setOpen = (next: boolean) => {
+    setUncontrolledOpen(next);
+    onOpenChange?.(next);
+  };
   const [errors, setErrors] = useState<FieldErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -100,7 +110,7 @@ export function FormDialog<T>({
         }
       }}
     >
-      <DialogTrigger render={trigger} />
+      {trigger && <DialogTrigger render={trigger} />}
       <DialogContent className={className}>
         <form onSubmit={onSubmit} className="grid gap-4">
           <DialogHeader>

@@ -35,9 +35,14 @@ export function ConfirmAction({
   action,
   onSuccess,
   children,
+  open: controlledOpen,
+  onOpenChange,
 }: {
-  /** The element that opens the dialog, usually a <Button />. */
-  trigger: React.ReactElement;
+  /** The element that opens the dialog, usually a <Button />. Omit when controlled. */
+  trigger?: React.ReactElement;
+  /** Controlled mode, e.g. opened from a dropdown menu item. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   title: string;
   description?: React.ReactNode;
   confirmLabel?: string;
@@ -50,7 +55,12 @@ export function ConfirmAction({
   children?: React.ReactNode;
 }) {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const open = controlledOpen ?? uncontrolledOpen;
+  const setOpen = (next: boolean) => {
+    setUncontrolledOpen(next);
+    onOpenChange?.(next);
+  };
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -83,7 +93,7 @@ export function ConfirmAction({
         if (!next) setError(null);
       }}
     >
-      <AlertDialogTrigger render={trigger} />
+      {trigger && <AlertDialogTrigger render={trigger} />}
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>

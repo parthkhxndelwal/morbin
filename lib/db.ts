@@ -124,6 +124,16 @@ export async function ensureIndexes(): Promise<void> {
     db.collection("payouts").createIndex({ organizationId: 1, status: 1, createdAt: -1 }),
     db.collection("payouts").createIndex({ status: 1, createdAt: -1 }),
     db.collection("payoutMessages").createIndex({ payoutId: 1, createdAt: 1 }),
+    // One bank account per organisation, enforced by the index so two
+    // concurrent saves can't leave a second row behind.
+    db.collection("payoutAccounts").createIndex({ organizationId: 1 }, { unique: true }),
+    // Team invites: accepted by token hash; one live invite per address per org.
+    db.collection("teamInvites").createIndex({ tokenHash: 1 }, { unique: true }),
+    db.collection("teamInvites").createIndex(
+      { organizationId: 1, email: 1 },
+      { unique: true, partialFilterExpression: { status: "PENDING" } },
+    ),
+    db.collection("teamInvites").createIndex({ organizationId: 1, status: 1, createdAt: -1 }),
     db.collection("refundCases").createIndex({ organizationId: 1, status: 1, createdAt: -1 }),
     db.collection("refundCases").createIndex({ status: 1, createdAt: -1 }),
     db.collection("refundCases").createIndex({ orderId: 1 }),

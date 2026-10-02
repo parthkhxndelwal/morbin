@@ -16,6 +16,10 @@ const securityHeaders = [
 const nextConfig: NextConfig = {
   output: "standalone",
   poweredByHeader: false,
+  experimental: {
+    // Payout statements (PDF, ≤10 MB) are uploaded through a server action.
+    serverActions: { bodySizeLimit: "11mb" },
+  },
   // No remotePatterns: every image this app renders is served from its own
   // origin (/public or /media), so no request is made to a third-party host.
   async headers() {

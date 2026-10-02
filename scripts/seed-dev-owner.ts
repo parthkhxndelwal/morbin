@@ -6,7 +6,8 @@
  *
  * Creates (idempotently) the org "Morbin Dev Test Org" and the verified user
  * DEV_OWNER_EMAIL (default owner@morbin.test) as its OWNER, with the password
- * from DEV_OWNER_PASSWORD. Refuses to run against a database whose name does
+ * from DEV_OWNER_PASSWORD, plus member@morbin.test as a MEMBER with the same
+ * password, for checking what a member can and can't see. Refuses to run against a database whose name does
  * not contain "test" or "dev", so it can never touch production.
  */
 import bcrypt from "bcryptjs";
@@ -71,5 +72,24 @@ await db
     { upsert: true },
   );
 
+const memberEmail = "member@morbin.test";
+await db.collection("users").updateOne(
+  { email: memberEmail },
+  {
+    $set: { passwordHash, emailVerified: now, name: "Dev Member", role: "USER", updatedAt: now },
+    $setOnInsert: { email: memberEmail, image: null, createdAt: now },
+  },
+  { upsert: true },
+);
+const member = await db.collection("users").findOne({ email: memberEmail });
+await db
+  .collection("memberships")
+  .updateOne(
+    { organizationId: orgId, userId: member!._id.toString() },
+    { $set: { role: "MEMBER" }, $setOnInsert: { createdAt: now } },
+    { upsert: true },
+  );
+
 console.log(`Dev owner ready: ${email} → "${org!.name}" (${orgId}) in ${dbName}`);
+console.log(`Dev member ready: ${memberEmail} (same password)`);
 await client.close();

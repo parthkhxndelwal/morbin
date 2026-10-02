@@ -37,6 +37,7 @@ export const STATUS = {
     VALID: { label: "Valid", tone: "success" },
     USED: { label: "Checked in", tone: "info" },
     REFUNDED: { label: "Refunded", tone: "neutral" },
+    REFUND_PENDING: { label: "Refund pending", tone: "warning" },
     VOID: { label: "Void", tone: "danger" },
   },
   organization: {

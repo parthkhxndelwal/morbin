@@ -78,6 +78,7 @@ export function DataTable<TData>({
   emptyDescription,
   emptyAction,
   rowHref,
+  onRowClick,
   exportHref,
   toolbar,
   pageSize = 20,
@@ -93,6 +94,8 @@ export function DataTable<TData>({
   emptyAction?: React.ReactNode;
   /** Makes each row navigate on click (keyboard: Enter). */
   rowHref?: (row: TData) => string;
+  /** Alternative to rowHref: open something (a sheet, a dialog) for the row. */
+  onRowClick?: (row: TData) => void;
   /** Build the server export URL for exactly what is on screen. */
   exportHref?: (view: DataTableViewState) => string;
   /** Extra controls, right-aligned in the toolbar. */
@@ -287,21 +290,26 @@ export function DataTable<TData>({
             {rows.length > 0 ? (
               rows.map((row) => {
                 const href = rowHref?.(row.original);
+                const activate = href
+                  ? () => router.push(href)
+                  : onRowClick
+                    ? () => onRowClick(row.original)
+                    : null;
                 return (
                   <TableRow
                     key={row.id}
-                    className={cn(href && "cursor-pointer")}
+                    className={cn(activate && "cursor-pointer")}
                     onClick={
-                      href
+                      activate
                         ? (e) => {
                             // Let buttons/links inside the row do their own thing.
                             if ((e.target as HTMLElement).closest("a,button,[role=menuitem]")) return;
-                            router.push(href);
+                            activate();
                           }
                         : undefined
                     }
-                    onKeyDown={href ? (e) => e.key === "Enter" && router.push(href) : undefined}
-                    tabIndex={href ? 0 : undefined}
+                    onKeyDown={activate ? (e) => e.key === "Enter" && activate() : undefined}
+                    tabIndex={activate ? 0 : undefined}
                   >
                     {row.getVisibleCells().map((cell) => (
                       <TableCell key={cell.id}>

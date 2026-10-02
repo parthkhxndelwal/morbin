@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MIN_PASSWORD_LENGTH } from "@/lib/admin-bootstrap-plan";
 
 export const loginSchema = z.object({
   email: z.string().email("Enter a valid email"),
@@ -51,3 +52,173 @@ export const eventDetailsSchema = z
     message: "The event must end after it starts",
     path: ["endsAt"],
   });
+
+const optionalLocalDateTime = z
+  .string()
+  .optional()
+  .transform((v, ctx) => {
+    if (!v) return null;
+    const d = parseLocalDateTime(v);
+    if (!d) {
+      ctx.addIssue({ code: "custom", message: "Enter a valid date and time" });
+      return z.NEVER;
+    }
+    return d;
+  });
+
+/** "₹499.50" / "499.5" / "0" → paise. */
+const rupees = z
+  .string()
+  .trim()
+  .transform((v, ctx) => {
+    const cleaned = v.replace(/[₹,\s]/g, "");
+    if (!/^\d+(\.\d{1,2})?$/.test(cleaned)) {
+      ctx.addIssue({ code: "custom", message: "Enter a price like 499 or 499.50 (0 for free)" });
+      return z.NEVER;
+    }
+    return Math.round(Number(cleaned) * 100);
+  })
+  .pipe(z.number().int().min(0).max(10_000_000, "That price is too high"));
+
+const positiveInt = (label: string, max: number) =>
+  z
+    .string()
+    .trim()
+    .transform((v, ctx) => {
+      if (!/^\d+$/.test(v)) {
+        ctx.addIssue({ code: "custom", message: `${label} must be a whole number` });
+        return z.NEVER;
+      }
+      return Number(v);
+    })
+    .pipe(z.number().int().min(1, `${label} must be at least 1`).max(max, `${label} is too large`));
+
+export const ticketTypeSchema = z
+  .object({
+    name: z.string().trim().min(2, "Name it (at least 2 characters)").max(80),
+    description: z.string().trim().max(500).default(""),
+    price: rupees,
+    capacity: positiveInt("Capacity", 1_000_000),
+    maxPerOrder: z
+      .string()
+      .trim()
+      .optional()
+      .transform((v, ctx) => {
+        if (!v) return null;
+        const n = Number(v);
+        if (!Number.isInteger(n) || n < 1 || n > 50) {
+          ctx.addIssue({ code: "custom", message: "Between 1 and 50, or leave empty" });
+          return z.NEVER;
+        }
+        return n;
+      }),
+    saleStartsAt: optionalLocalDateTime,
+    saleEndsAt: optionalLocalDateTime,
+  })
+  .refine((v) => !v.saleStartsAt || !v.saleEndsAt || v.saleEndsAt > v.saleStartsAt, {
+    message: "Sales must end after they start",
+    path: ["saleEndsAt"],
+  });
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Organisation settings
+ *
+ * FormData always delivers strings, so every optional field below is written
+ * as "blank means unset": the box is trimmed, a format is checked only when
+ * something was typed, and an empty result becomes `null` for the database.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/** The GSTIN shape: 2-digit state code, 10-char PAN, entity code, 'Z', checksum. */
+const GSTIN_RE = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
+/** IFSC: 4 letters (bank), '0' (reserved), 6 alphanumeric (branch). */
+const IFSC_RE = /^[A-Z]{4}0[A-Z0-9]{6}$/;
+
+/**
+ * An optional field: an empty box clears it, anything else must satisfy
+ * `schema`. The inner schema's own message is replaced with `error` so the
+ * inline error is written in the app's voice — a union of "blank or valid"
+ * would only ever surface zod's generic "invalid input".
+ */
+const optionalField = (
+  schema: z.ZodType,
+  error: string,
+  normalise: (v: string) => string = (v) => v,
+) =>
+  z
+    .string()
+    .transform(normalise)
+    .refine((v) => v.length === 0 || schema.safeParse(v).success, error)
+    .transform((v) => (v.length > 0 ? v : null));
+
+export const orgProfileSchema = z.object({
+  name: z.string().trim().min(2, "At least 2 characters").max(120, "At most 120 characters"),
+  contactEmail: optionalField(z.string().email(), "Enter a valid email address", (v) =>
+    v.trim().toLowerCase(),
+  ),
+  contactPhone: optionalField(
+    z.string().regex(/^\+?[\d\s-]{7,18}$/, ""),
+    "Enter a valid phone number",
+    (v) => v.trim(),
+  ),
+  gstin: optionalField(
+    z.string().regex(GSTIN_RE, ""),
+    "A GSTIN looks like 27AAPFU0939F1ZV",
+    (v) => v.trim().toUpperCase(),
+  ),
+  address: optionalField(
+    z.string().max(500, "At most 500 characters"),
+    "At most 500 characters",
+    (v) => v.trim(),
+  ),
+});
+
+/** Who pays the convenience fee. The rate itself is admin-set and not here. */
+export const feeBearerSchema = z.object({
+  feeBearer: z.enum(["CUSTOMER", "ORGANISER"], { error: "Choose who pays the convenience fee" }),
+});
+
+/**
+ * Payout bank details. `accountNumber` is optional: a blank box keeps whatever is
+ * already stored, so an owner can correct a name or IFSC without the number
+ * ever having to travel back through the browser.
+ */
+export const payoutAccountSchema = z.object({
+  accountName: z.string().trim().min(2, "At least 2 characters").max(120, "At most 120 characters"),
+  ifsc: z
+    .string()
+    .transform((v) => v.trim().toUpperCase())
+    .refine((v) => IFSC_RE.test(v), "An IFSC looks like HDFC0001234"),
+  accountNumber: optionalField(
+    z.string().regex(/^[0-9]{9,18}$/, ""),
+    "Enter the account number — 9 to 18 digits",
+    (v) => v.replace(/[\s-]/g, ""),
+  ),
+});
+
+/** Owner inviting someone to the team. Name is optional: the invitee can set it. */
+export const teamInviteSchema = z.object({
+  email: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .pipe(z.string().email("Enter a valid email address").max(254, "That email is too long")),
+  name: z
+    .string()
+    .trim()
+    .max(80, "At most 80 characters")
+    .transform((v) => v || null),
+});
+
+/** Someone accepting a team invite: their name and a new password. */
+export const joinTeamSchema = z
+  .object({
+    name: z.string().trim().min(2, "At least 2 characters").max(80, "At most 80 characters"),
+    password: z
+      .string()
+      .min(MIN_PASSWORD_LENGTH, `At least ${MIN_PASSWORD_LENGTH} characters`)
+      .max(128, "At most 128 characters")
+      .regex(/[A-Z]/, "Include an uppercase letter")
+      .regex(/[0-9]/, "Include a number"),
+    confirm: z.string(),
+  })
+  .refine((v) => v.password === v.confirm, { path: ["confirm"], message: "The passwords don't match" });

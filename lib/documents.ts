@@ -25,7 +25,8 @@ const TYPES: Record<string, { ext: string; magic?: number[] }> = {
 };
 
 function root(): string {
-  return path.resolve(process.env.DOCUMENTS_DIR ?? path.join(process.cwd(), "data", "documents"));
+  // Runtime data directory, never part of the build: keep it out of output tracing.
+  return path.resolve(/*turbopackIgnore: true*/ process.env.DOCUMENTS_DIR ?? path.join(process.cwd(), "data", "documents"));
 }
 
 /** Does the content really have this type? (Declared types are not trusted.) */
@@ -56,7 +57,7 @@ export async function storeDocument(input: {
   if (!matchesType(input.body, input.contentType)) throw new Error("The file's contents don't match its type");
 
   const storageKey = `${input.organizationId ?? "platform"}/${randomUUID()}.${spec.ext}`;
-  const full = path.join(root(), storageKey);
+  const full = path.join(/*turbopackIgnore: true*/ root(), storageKey);
   await mkdir(path.dirname(full), { recursive: true });
   const tmp = `${full}.${process.pid}.tmp`;
   await writeFile(tmp, input.body, { mode: 0o640 });
@@ -88,7 +89,7 @@ export async function getDocument(id: string): Promise<StoredDocument | null> {
 
 /** Read a document's bytes, verifying they are unchanged since upload. */
 export async function readDocumentBody(doc: StoredDocument): Promise<Buffer> {
-  const full = path.resolve(root(), doc.storageKey);
+  const full = path.resolve(/*turbopackIgnore: true*/ root(), doc.storageKey);
   if (!full.startsWith(root() + path.sep)) throw new Error("Invalid document path");
   const body = await readFile(full);
   if (createHash("sha256").update(body).digest("hex") !== doc.sha256) {

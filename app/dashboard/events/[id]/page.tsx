@@ -1,126 +1,90 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getDb } from "@/lib/db";
-import { getEventById, getTicketTypes } from "@/lib/events";
+import { IndianRupeeIcon, ReceiptIcon, ScanLineIcon, TicketIcon } from "lucide-react";
+import { EventStatusCard } from "@/components/features/events/event-status-card";
+import { OrdersTable } from "@/components/features/orders/orders-table";
+import { TicketTypesCard } from "@/components/features/tickets/ticket-types-card";
+import { StatCard, StatGrid } from "@/components/patterns/stat-card";
+import { Button } from "@/components/ui/button";
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { getEventOverview, getOrgOrderRows } from "@/lib/dashboard-data";
+import { publishBlockers } from "@/lib/event-service";
+import { getOrgEvent } from "@/lib/events";
+import { formatCount, formatINR } from "@/lib/format";
 import { requireOrgSession } from "@/lib/guards";
-import type { Order, Ticket } from "@/lib/types";
-import { CheckinBox, PublishBar, TicketTypeForm } from "./controls";
+import { can } from "@/lib/permissions";
 
-export default async function EventDetailPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
-  const { org } = await requireOrgSession();
+export default async function EventOverviewPage({ params }: { params: Promise<{ id: string }> }) {
+  const { org, role } = await requireOrgSession();
   const { id } = await params;
-  const event = await getEventById(id);
-  if (!event || event.organizationId !== org._id.toString()) notFound();
+  const orgId = org._id.toString();
+  const event = await getOrgEvent(id, orgId);
+  if (!event) notFound();
 
-  const db = await getDb();
-  const [types, tickets, totals] = await Promise.all([
-    getTicketTypes(event._id!.toString()),
-    db
-      .collection<Ticket>("tickets")
-      .find({ eventId: event._id!.toString(), status: { $in: ["VALID", "USED"] } })
-      .sort({ _id: -1 })
-      .limit(200)
-      .toArray(),
-    Promise.all([
-      db
-        .collection<Order>("orders")
-        .aggregate<{ revenue: number }>([
-          { $match: { eventId: event._id!.toString(), status: "PAID" } },
-          { $group: { _id: null, revenue: { $sum: "$totalPaise" } } },
-        ])
-        .toArray(),
-      db
-        .collection<Ticket>("tickets")
-        .countDocuments({
-          eventId: event._id!.toString(),
-          status: { $in: ["VALID", "USED"] },
-        }),
-    ]),
+  const canManage = can(role, "manageEvents") && org.status !== "SUSPENDED";
+  const ended = event.endsAt < new Date();
+  const status = event.status === "PUBLISHED" && ended ? "ENDED" : event.status;
+  const [overview, blockers, recentOrders] = await Promise.all([
+    getEventOverview(id, orgId),
+    event.status === "DRAFT" ? publishBlockers(orgId, id) : Promise.resolve([]),
+    getOrgOrderRows(orgId, { eventId: id, limit: 6 }),
   ]);
-  const revenue = totals[0][0]?.revenue ?? 0;
-  const ticketCount = totals[1];
+  const checkinRate =
+    overview.ticketsLive > 0 ? Math.round((overview.checkedIn / overview.ticketsLive) * 100) : 0;
+  const locked =
+    event.status === "CANCELLED"
+      ? "This event is cancelled, so ticket types can't change."
+      : ended
+        ? "This event has ended, so ticket types can't change."
+        : null;
 
   return (
-    <div>
-      <Link href="/dashboard/events" className="text-sm text-neutral-400 hover:text-white">
-        ← Events
-      </Link>
-      <div className="mt-2 flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">{event.title}</h1>
-          <p className="mt-1 text-sm text-neutral-400">
-            {event.venue} · Revenue ₹{(revenue / 100).toFixed(0)} · {ticketCount} tickets
-          </p>
-          {event.status === "PUBLISHED" && (
-            <p className="mt-1 text-sm">
-              Public link:{" "}
-              <Link href={`/e/${event.slug}`} className="text-violet-300 underline">
-                /e/{event.slug}
-              </Link>
-            </p>
-          )}
-        </div>
-        <PublishBar eventId={event._id!.toString()} status={event.status} />
-      </div>
+    <div className="space-y-6">
+      <EventStatusCard
+        eventId={id}
+        status={status}
+        blockers={blockers}
+        hasBookings={overview.hasBookings}
+        canManage={canManage}
+      />
 
-      <h2 className="mt-8 text-sm font-bold uppercase tracking-widest text-neutral-400">
-        Ticket types
-      </h2>
-      <div className="mt-3 space-y-2">
-        {types.map((t) => (
-          <div
-            key={t._id!.toString()}
-            className="flex items-center justify-between rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm"
-          >
-            <span className="font-semibold">{t.name}</span>
-            <span className="text-neutral-400">
-              ₹{(t.pricePaise / 100).toFixed(0)} · {t.soldCount}/{t.capacity} sold
-            </span>
-          </div>
-        ))}
-        {types.length === 0 && (
-          <p className="text-sm text-neutral-500">No ticket types yet.</p>
-        )}
-      </div>
-      {event.status === "DRAFT" && (
-        <div className="mt-3">
-          <TicketTypeForm eventId={event._id!.toString()} />
-        </div>
-      )}
+      <StatGrid>
+        <StatCard
+          label="Ticket sales"
+          value={formatINR(overview.ticketSalesPaise)}
+          hint="Net of refunds, excluding convenience fees"
+          icon={<IndianRupeeIcon />}
+        />
+        <StatCard
+          label="Tickets sold"
+          value={`${formatCount(overview.ticketsLive)} / ${formatCount(overview.capacity)}`}
+          icon={<TicketIcon />}
+        />
+        <StatCard
+          label="Checked in"
+          value={`${checkinRate}%`}
+          hint={`${formatCount(overview.checkedIn)} of ${formatCount(overview.ticketsLive)}`}
+          icon={<ScanLineIcon />}
+        />
+        <StatCard label="Orders" value={formatCount(overview.paidOrders)} icon={<ReceiptIcon />} />
+      </StatGrid>
 
-      <h2 className="mt-8 text-sm font-bold uppercase tracking-widest text-neutral-400">
-        Door check-in
-      </h2>
-      <div className="mt-3">
-        <CheckinBox />
-      </div>
+      <TicketTypesCard eventId={id} rows={overview.ticketTypes} canManage={canManage} locked={locked} />
 
-      <h2 className="mt-8 text-sm font-bold uppercase tracking-widest text-neutral-400">
-        Attendees ({ticketCount}{ticketCount > tickets.length ? ` · showing recent ${tickets.length}` : ""})
-      </h2>
-      <div className="mt-3 max-h-96 overflow-auto rounded-2xl border border-white/10">        <table className="w-full text-sm">
-          <thead className="sticky top-0 bg-[#0b0b1c]">
-            <tr className="text-left text-neutral-400">
-              <th className="px-4 py-2 font-medium">Name</th>
-              <th className="px-4 py-2 font-medium">Code</th>
-              <th className="px-4 py-2 font-medium">Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {tickets.map((t) => (
-              <tr key={t._id!.toString()} className="border-t border-white/5">
-                <td className="px-4 py-2">{t.attendeeName}</td>
-                <td className="px-4 py-2 font-mono text-xs text-neutral-400">{t.code}</td>
-                <td className="px-4 py-2">{t.status}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>Latest orders</CardTitle>
+          <CardDescription>Every booking for this event, newest first.</CardDescription>
+          <CardAction>
+            <Button variant="outline" size="sm" render={<Link href={`/dashboard/events/${id}/orders`} />} nativeButton={false}>
+              All orders
+            </Button>
+          </CardAction>
+        </CardHeader>
+        <CardContent>
+          <OrdersTable rows={recentOrders} showEvent={false} compact />
+        </CardContent>
+      </Card>
     </div>
   );
 }

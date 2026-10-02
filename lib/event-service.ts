@@ -1,5 +1,5 @@
 import { ObjectId } from "mongodb";
-import { audit } from "@/lib/audit";
+import { audit, notify } from "@/lib/audit";
 import { getDb, toObjectId } from "@/lib/db";
 import { formatINR } from "@/lib/format";
 import { unsettledTotals } from "@/lib/ledger";
@@ -204,6 +204,17 @@ export async function cancelEvent(
       },
       { upsert: true },
     );
+  }
+
+  if (failed.length > 0) {
+    await notify({
+      organizationId: null,
+      audience: "ADMIN",
+      kind: "CANCELLATION_REFUNDS_BLOCKED",
+      title: `${failed.length} refund(s) couldn't be raised for "${event.title}"`,
+      body: "The organisation's unpaid balance didn't cover them. Arrange the refunds manually.",
+      link: `/dashboard/admin/orgs/${actor.organizationId}`,
+    });
   }
 
   await audit({

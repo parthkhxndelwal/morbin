@@ -21,12 +21,13 @@ const INR_COMPACT = new Intl.NumberFormat("en-IN", {
 
 /** ₹1,234.50 */
 export function formatINR(paise: number): string {
-  return INR.format(paise / 100);
+  // `|| 0` folds -0 into 0, so a negated zero never renders as "-₹0.00".
+  return INR.format(paise / 100 || 0);
 }
 
 /** ₹1.2L — for KPI tiles where precision would be noise. */
 export function formatINRCompact(paise: number): string {
-  return INR_COMPACT.format(paise / 100);
+  return INR_COMPACT.format(paise / 100 || 0);
 }
 
 /** The app's display timezone when an event does not specify one. */

@@ -45,7 +45,8 @@ export function extensionFor(contentType: string): string {
 export { MAX_BYTES, ALLOWED };
 
 function mediaRoot(): string {
-  return path.resolve(process.env.MEDIA_DIR ?? path.join(process.cwd(), "data", "media"));
+  // Runtime data directory, never part of the build: keep it out of output tracing.
+  return path.resolve(/*turbopackIgnore: true*/ process.env.MEDIA_DIR ?? path.join(process.cwd(), "data", "media"));
 }
 
 /**
@@ -62,7 +63,7 @@ export function isValidMediaKey(key: string): boolean {
 
 function resolveKey(key: string): string {
   if (!isValidMediaKey(key)) throw new Error("Invalid media key");
-  const full = path.resolve(mediaRoot(), key);
+  const full = path.resolve(/*turbopackIgnore: true*/ mediaRoot(), key);
   if (!full.startsWith(mediaRoot() + path.sep)) throw new Error("Invalid media key");
   return full;
 }

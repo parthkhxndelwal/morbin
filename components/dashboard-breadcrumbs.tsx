@@ -28,6 +28,7 @@ const SEGMENTS: Record<string, string> = {
   details: "Details",
   refunds: "Refunds",
   payouts: "Payouts",
+  notifications: "Notifications",
   datasets: "Datasets",
   team: "Team",
   settings: "Settings",

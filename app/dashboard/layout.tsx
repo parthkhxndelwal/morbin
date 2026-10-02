@@ -3,6 +3,7 @@ import { AlertTriangleIcon } from "lucide-react";
 import { AppSidebar } from "@/components/app-sidebar";
 import { BreadcrumbLabelsProvider } from "@/components/breadcrumb-labels";
 import { DashboardBreadcrumbs } from "@/components/dashboard-breadcrumbs";
+import { NotificationsBell } from "@/components/notifications-bell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -13,8 +14,15 @@ import {
 import { auth, signOut } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import type { BreadcrumbLabels, DashboardNav, Workspace } from "@/lib/nav";
+import {
+  ADMIN_NOTIFICATIONS,
+  getNotifications,
+  getUnreadCount,
+  orgNotifications,
+  type NotificationItem,
+} from "@/lib/notifications";
 import { getOrgForUser } from "@/lib/organizations";
-import { describeMemberRole } from "@/lib/permissions";
+import { can, describeMemberRole } from "@/lib/permissions";
 import type { Event, Organization } from "@/lib/types";
 
 /**
@@ -91,13 +99,29 @@ export default async function DashboardLayout({
       subtitle: describeMemberRole(org!.type ?? "EVENT", resolved!.role),
       href: "/dashboard",
     };
+    const orgMain: DashboardNav["main"] = [
+      { title: "Overview", url: "/dashboard", icon: "overview", exact: true },
+      { title: "Events", url: "/dashboard/events", icon: "events" },
+      { title: "Check-in", url: "/dashboard/scan", icon: "checkin" },
+      { title: "Orders", url: "/dashboard/orders", icon: "orders" },
+    ];
+    if (can(resolved!.role, "refund")) {
+      orgMain.push({ title: "Refunds", url: "/dashboard/refunds", icon: "refunds" });
+    }
+    if (can(resolved!.role, "finance")) {
+      orgMain.push({ title: "Payouts", url: "/dashboard/payouts", icon: "payouts" });
+    }
+    orgMain.push({ title: "Team", url: "/dashboard/team", icon: "team" });
+    if (can(resolved!.role, "finance")) {
+      orgMain.push({
+        title: "Settings",
+        url: "/dashboard/settings",
+        icon: "settings",
+      });
+    }
     nav = {
       label: "Organisation",
-      main: [
-        { title: "Overview", url: "/dashboard", icon: "overview", exact: true },
-        { title: "Events", url: "/dashboard/events", icon: "events" },
-        { title: "Check-in", url: "/dashboard/scan", icon: "checkin" },
-      ],
+      main: orgMain,
       shortcutsLabel: "Upcoming events",
       shortcuts: upcoming.map((e) => ({
         name: e.title,
@@ -112,6 +136,20 @@ export default async function DashboardLayout({
     "use server";
     await signOut({ redirectTo: "/" });
   }
+
+  // The bell reads the same audience the navigation above was built from: admins
+  // see the platform desk, owners their organisation's notices, members none.
+  const notificationScope = isAdmin
+    ? ADMIN_NOTIFICATIONS
+    : org
+      ? orgNotifications(org._id!.toString(), resolved!.role)
+      : null;
+  const [unreadCount, recentNotifications]: [number, NotificationItem[]] = notificationScope
+    ? await Promise.all([
+        getUnreadCount(notificationScope),
+        getNotifications(notificationScope, { limit: 8 }),
+      ])
+    : [0, []];
 
   return (
     <BreadcrumbLabelsProvider initial={labels}>
@@ -137,6 +175,11 @@ export default async function DashboardLayout({
               <DashboardBreadcrumbs
                 rootHref={isAdmin ? "/dashboard/admin" : "/dashboard"}
               />
+            </div>
+            <div className="ml-auto flex shrink-0 items-center pr-4">
+              {notificationScope && (
+                <NotificationsBell unreadCount={unreadCount} items={recentNotifications} />
+              )}
             </div>
           </header>
           <div className="flex flex-1 flex-col gap-6 p-4 pt-0 md:px-6">

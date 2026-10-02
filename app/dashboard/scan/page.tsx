@@ -1,69 +1,57 @@
-"use client";
+import { PageHeader } from "@/components/patterns/page-header";
+import { getDb } from "@/lib/db";
+import { requireOrgSession } from "@/lib/guards";
+import type { Event } from "@/lib/types";
+import { CheckinScanner, type ScannerEvent } from "./scanner";
 
-import { useState } from "react";
+export const metadata = { title: "Check-in" };
 
-export default function VerifyPage() {
-  const [input, setInput] = useState("");
-  const [result, setResult] = useState("");
-  const [busy, setBusy] = useState(false);
+/**
+ * The check-in desk.
+ *
+ * Authorises the session, then hands the scanner a plain list of the
+ * organisation's own events to choose between — nearest upcoming first, so the
+ * desk opens on the event being worked right now. Cancelled events are left out
+ * (nobody works a cancelled door) and nothing else about an event is sent: the
+ * scanner gets ids, titles and dates, never a document.
+ */
+export default async function ScanPage() {
+  const { org } = await requireOrgSession();
+  const now = new Date();
+  const db = await getDb();
+  const events = await db
+    .collection<Event>("events")
+    .find(
+      { organizationId: org._id.toString(), status: { $ne: "CANCELLED" } },
+      { projection: { title: 1, startsAt: 1, endsAt: 1, status: 1 } },
+    )
+    .sort({ startsAt: 1 })
+    .limit(300)
+    .toArray();
 
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    setResult("");
-    try {
-      const res = await fetch("/api/tickets/verify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ input }),
-      });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setResult(`✗ ${body.error ?? "Invalid"}`);
-        return;
-      }
-      setResult(`✓ ${body.attendeeName} — ${body.eventTitle}`);
-    } catch {
-      setResult("✗ Network error. Please try again.");
-    } finally {
-      setBusy(false);
-    }
+  const upcoming: ScannerEvent[] = [];
+  const past: ScannerEvent[] = [];
+  for (const event of events) {
+    if (!event._id || event.status === "CANCELLED") continue;
+    const row: ScannerEvent = {
+      id: event._id.toString(),
+      title: event.title,
+      startsAt: event.startsAt.toISOString(),
+      endsAt: event.endsAt.toISOString(),
+      status: event.status,
+      past: event.endsAt < now,
+    };
+    (event.endsAt >= now ? upcoming : past).push(row);
   }
+  past.reverse();
 
   return (
-    <div className="min-h-dvh bg-[#060614] px-6 py-12 font-sans text-white antialiased">
-      <div className="mx-auto w-full max-w-xl text-center">
-        <h1 className="text-2xl font-bold tracking-tight">Check-in desk</h1>
-        <p className="mt-1 text-sm text-neutral-400">
-          Type or paste a ticket code (or QR payload).
-        </p>
-        <form onSubmit={onSubmit} className="mt-6 flex gap-2">
-          <input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="MRB-XXXXXXXX"
-            autoComplete="off"
-            className="flex-1 rounded-xl border border-white/15 bg-white/5 px-4 py-3 text-center font-mono text-sm uppercase outline-none placeholder:text-neutral-500 focus:border-violet-400/60"
-          />
-          <button
-            disabled={busy}
-            className="rounded-full bg-white px-6 py-3 text-sm font-bold text-neutral-950 hover:bg-violet-200 disabled:opacity-60"
-          >
-            Verify
-          </button>
-        </form>
-        {result && (
-          <p
-            className={`mt-6 rounded-2xl border p-5 text-lg font-bold ${
-              result.startsWith("✓")
-                ? "border-emerald-400/30 bg-emerald-500/10 text-emerald-200"
-                : "border-rose-400/30 bg-rose-500/10 text-rose-200"
-            }`}
-          >
-            {result}
-          </p>
-        )}
-      </div>
+    <div className="space-y-6">
+      <PageHeader
+        title="Check-in"
+        description="Scan a ticket's QR code with the camera, or type the code. Every ticket is admitted once."
+      />
+      <CheckinScanner events={[...upcoming, ...past]} />
     </div>
   );
 }

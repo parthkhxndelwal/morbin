@@ -28,12 +28,17 @@ export async function getActiveFlow(eventId: string): Promise<CheckoutFlow> {
   return flow ?? permissiveFlow(eventId);
 }
 
+/**
+ * The draft is the one working copy, always version 0. Matching the version too
+ * keeps superseded publishes that older code retired as "DRAFT" from ever being
+ * mistaken for it.
+ */
+const DRAFT_FILTER = { status: "DRAFT", version: 0 } as const;
+
 /** The organizer's unpublished working copy, if one exists. */
 export async function getFlowDraft(eventId: string): Promise<CheckoutFlow | null> {
   const db = await getDb();
-  return db
-    .collection<CheckoutFlow>("checkoutFlows")
-    .findOne({ eventId, status: "DRAFT" }, { sort: { version: -1 } });
+  return db.collection<CheckoutFlow>("checkoutFlows").findOne({ eventId, ...DRAFT_FILTER });
 }
 
 export async function createFlow(flow: CheckoutFlow): Promise<CheckoutFlow> {
@@ -68,15 +73,17 @@ export async function publishFlow(eventId: string, steps: FlowStep[]): Promise<C
     createdAt: now,
     updatedAt: now,
   };
-  await db.collection<CheckoutFlow>("checkoutFlows").insertOne(published);
-  // Retire the previous version (and any stale draft) so exactly one PUBLISHED
-  // row exists per event.
-  await db
-    .collection<CheckoutFlow>("checkoutFlows")
-    .updateMany(
-      { eventId, version: { $ne: version } },
-      { $set: { status: "DRAFT", updatedAt: now } },
-    );
+  const flows = db.collection<CheckoutFlow>("checkoutFlows");
+  // A concurrent publish computing the same version loses on the unique
+  // (eventId, version) index rather than creating two live rows.
+  await flows.insertOne(published);
+  // Exactly one PUBLISHED row per event: earlier ones are kept as history.
+  await flows.updateMany(
+    { eventId, status: "PUBLISHED", version: { $ne: version } },
+    { $set: { status: "RETIRED", updatedAt: now } },
+  );
+  // The working copy has just become the live flow, so it is consumed.
+  await flows.deleteMany({ eventId, ...DRAFT_FILTER });
   return published;
 }
 
@@ -85,7 +92,7 @@ export async function saveFlowDraft(eventId: string, steps: FlowStep[]): Promise
   const db = await getDb();
   const existing = await db
     .collection<CheckoutFlow>("checkoutFlows")
-    .findOne({ eventId, status: "DRAFT" }, { sort: { version: -1 } });
+    .findOne({ eventId, ...DRAFT_FILTER });
   const now = new Date();
   if (existing) {
     await db

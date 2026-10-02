@@ -41,3 +41,34 @@ export async function orgActor(
     },
   };
 }
+
+/**
+ * Who may change an event: its organisation's OWNER, or a platform ADMIN acting
+ * as support. Returns the actor in the shape `lib/event-service` takes, with
+ * `capacity` recording which one it was so every change is attributed.
+ */
+export async function eventEditor(
+  eventId: string,
+): Promise<{ actor: import("@/lib/event-service").EventActor } | { error: string }> {
+  const session = await auth();
+  if (!session?.user?.id) return { error: "Your session has ended. Sign in again." };
+  const { getDb, toObjectId } = await import("@/lib/db");
+  const db = await getDb();
+  const eventOid = toObjectId(eventId);
+  if (!eventOid) return { error: "Event not found." };
+  const event = await db
+    .collection<{ organizationId: string }>("events")
+    .findOne({ _id: eventOid }, { projection: { organizationId: 1 } });
+  if (!event) return { error: "Event not found." };
+
+  const user = await db
+    .collection<{ role?: string }>("users")
+    .findOne({ _id: toObjectId(session.user.id) as never }, { projection: { role: 1 } });
+  if (user?.role === "ADMIN") {
+    return { actor: { organizationId: event.organizationId, userId: session.user.id, capacity: "ADMIN" } };
+  }
+  const guard = await orgActor("manageEvents");
+  if ("error" in guard) return guard;
+  if (guard.actor.orgId !== event.organizationId) return { error: "Event not found." };
+  return { actor: { organizationId: event.organizationId, userId: session.user.id, capacity: "OWNER" } };
+}

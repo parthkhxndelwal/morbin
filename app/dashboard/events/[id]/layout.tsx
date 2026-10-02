@@ -20,7 +20,9 @@ export async function generateMetadata({
   const { org } = await requireOrgSession();
   const { id } = await params;
   const event = await getOrgEvent(id, org._id.toString());
-  return { title: event?.title ?? "Event" };
+  const name = event?.title ?? "Event";
+  // Tab pages ("Booking flow", "Orders"…) read "Booking flow · Fest — Morbin".
+  return { title: { default: name, template: `%s · ${name} — Morbin` } };
 }
 
 /**
@@ -47,12 +49,15 @@ export default async function EventLayout({
 
   const tabs: EventTab[] = [
     { label: "Overview", path: "" },
+    ...(manage ? [{ label: "Details", path: "details" }] : []),
     ...(manage
       ? [
           { label: "Booking flow", path: "flow" },
           { label: "Appearance", path: "appearance" },
         ]
       : []),
+    { label: "Orders", path: "orders" },
+    { label: "Attendees", path: "attendees" },
     { label: "Insights", path: "insights" },
   ];
 

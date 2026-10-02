@@ -74,6 +74,12 @@ export interface Organization {
   retentionMonths?: number | null;
   /** Support (admin) publishes become proposals the owner must approve. */
   requireApprovalForSupportChanges?: boolean | null;
+  /** Where Morbin sends this organisation's paperwork. Owner-editable. */
+  contactEmail?: string | null;
+  contactPhone?: string | null;
+  /** GSTIN, when the organisation is registered. Printed on payout invoices. */
+  gstin?: string | null;
+  address?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -98,6 +104,27 @@ export interface Membership {
   userId: string;
   role: OrgRole;
   createdAt: Date;
+}
+
+/**
+ * An invitation for someone with no Morbin account to join an organisation as
+ * a MEMBER. Only the sha256 of the emailed token is stored, so the database
+ * alone can never be used to accept an invite.
+ */
+export interface TeamInvite {
+  _id?: ObjectId;
+  organizationId: string;
+  email: string;
+  name: string | null;
+  tokenHash: string;
+  status: "PENDING" | "ACCEPTED" | "REVOKED";
+  invitedBy: string;
+  expiresAt: Date;
+  lastSentAt: Date;
+  sendCount: number;
+  acceptedUserId: string | null;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export type EventStatus = "DRAFT" | "PUBLISHED" | "CANCELLED";
@@ -249,7 +276,16 @@ export interface WebhookRecord {
   processedAt?: Date | null;
 }
 
-export type EmailKind = "TICKET" | "REFUND" | "EVENT_UPDATE" | "FLOW_MAGIC_LINK" | "EMAIL_VERIFY";
+export type EmailKind =
+  | "TICKET"
+  | "REFUND"
+  | "EVENT_UPDATE"
+  | "FLOW_MAGIC_LINK"
+  | "EMAIL_VERIFY"
+  /** A new person invited to an organisation: carries a one-time join link. */
+  | "TEAM_INVITE"
+  /** An existing Morbin user added to an organisation. */
+  | "TEAM_ADDED";
 
 export interface EmailRecord {
   _id?: ObjectId;
@@ -277,6 +313,11 @@ export interface EmailRecord {
     refundStage?: "SENT" | "COMPLETED" | "APPROVED_ORG";
     refundArn?: string | null;
     refundSpeed?: "NORMAL" | "INSTANT";
+    /** TEAM_INVITE / TEAM_ADDED. */
+    organizationName?: string;
+    inviterName?: string;
+    /** A link carrying a secret (join token). Cleared once the email is sent. */
+    link?: string | null;
   } | null;
 }
 
@@ -357,7 +398,8 @@ export interface CheckoutFlow {
    * is already holding an open drawer.
    */
   version: number;
-  status: "DRAFT" | "PUBLISHED";
+  /** DRAFT is the single working copy (version 0); RETIRED is a superseded publish, kept for history. */
+  status: "DRAFT" | "PUBLISHED" | "RETIRED";
   steps: FlowStep[];
   createdAt: Date;
   updatedAt: Date;
@@ -667,6 +709,28 @@ export type StoredDocumentKind =
   | "PAYOUT_BREAKDOWN"
   | "TICKET_PDF"
   | "REFUND_PROOF";
+
+/**
+ * The bank account a payout is transferred to.
+ *
+ * The account number is never stored in the clear: `accountNumberEnc` is
+ * AES-256-GCM under `DATA_ENCRYPTION_KEY` (see `lib/payout-accounts`), and
+ * `last4` is kept beside it purely so the dashboard can show which account is
+ * on file without decrypting anything. One account per organisation.
+ */
+export interface PayoutAccount {
+  _id?: ObjectId;
+  organizationId: string;
+  /** Name on the account, as the bank records it. */
+  accountName: string;
+  ifsc: string;
+  accountNumberEnc: string;
+  last4: string;
+  /** Set when an admin confirms the account; null until then. */
+  verifiedAt?: Date | null;
+  createdAt?: Date;
+  updatedAt: Date;
+}
 
 export interface StoredDocument {
   _id?: ObjectId;
