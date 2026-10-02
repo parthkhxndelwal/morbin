@@ -121,3 +121,59 @@ export async function findRefundForCase(
   };
   return list.items.find((r) => r.notes?.refundCaseId === refundCaseId) ?? null;
 }
+
+export type RazorpayBalance =
+  | { available: true; balancePaise: number; currency: string; fetchedAt: string }
+  | { available: false; reason: string };
+
+const BALANCE_TTL_MS = 60_000;
+
+declare global {
+  var __morbin_rzp_balance: { at: number; value: RazorpayBalance } | undefined;
+}
+
+/**
+ * Morbin's Razorpay account balance, which refunds are paid from. Cached for
+ * 60s server-side so the refunds queue doesn't call Razorpay on every render.
+ *
+ * Razorpay documents a balance API only for RazorpayX accounts; for payment
+ * gateway accounts `GET /v1/balance` answers when the account has it enabled.
+ * Anything else — keys missing, the endpoint not enabled, a timeout — comes
+ * back as `available: false` with a reason to show, never as an error.
+ */
+export async function fetchBalance(now = Date.now()): Promise<RazorpayBalance> {
+  const hit = globalThis.__morbin_rzp_balance;
+  if (hit && now - hit.at < BALANCE_TTL_MS) return hit.value;
+  const value = await loadBalance();
+  globalThis.__morbin_rzp_balance = { at: now, value };
+  return value;
+}
+
+async function loadBalance(): Promise<RazorpayBalance> {
+  const keyId = process.env.RAZORPAY_KEY_ID;
+  const secret = process.env.RAZORPAY_KEY_SECRET;
+  if (!keyId || !secret) return { available: false, reason: "Razorpay keys aren't configured" };
+  try {
+    const res = await fetch("https://api.razorpay.com/v1/balance", {
+      headers: { Authorization: `Basic ${Buffer.from(`${keyId}:${secret}`).toString("base64")}` },
+      signal: AbortSignal.timeout(5000),
+      cache: "no-store",
+    });
+    const body = (await res.json().catch(() => null)) as
+      | { balance?: number; currency?: string; error?: { description?: string } }
+      | null;
+    if (!res.ok || typeof body?.balance !== "number") {
+      const why = body?.error?.description;
+      return {
+        available: false,
+        reason: why ? `Razorpay: ${why}` : `Razorpay didn't return a balance for this account (HTTP ${res.status})`,
+      };
+    }
+    return { available: true, balancePaise: body.balance, currency: body.currency ?? "INR", fetchedAt: new Date().toISOString() };
+  } catch (error) {
+    return {
+      available: false,
+      reason: (error as Error)?.name === "TimeoutError" ? "Razorpay didn't answer in time" : "Couldn't reach Razorpay",
+    };
+  }
+}

@@ -165,6 +165,7 @@ export async function ensureIndexes(): Promise<void> {
     db.collection("refundCases").createIndex({ organizationId: 1, status: 1, createdAt: -1 }),
     db.collection("refundCases").createIndex({ status: 1, createdAt: -1 }),
     db.collection("refundCases").createIndex({ orderId: 1 }),
+    db.collection("refundMessages").createIndex({ refundCaseId: 1, createdAt: 1 }),
     db.collection("refundCases").createIndex({ razorpayRefundId: 1 }, { sparse: true }),
     db.collection("tickets").createIndex({ refundCaseId: 1 }, { sparse: true }),
     db.collection("orders").createIndex({ organizationId: 1, status: 1, createdAt: -1 }),

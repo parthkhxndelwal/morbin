@@ -1,7 +1,7 @@
 "use client";
 
 import type { ColumnDef } from "@tanstack/react-table";
-import { CheckIcon, RotateCwIcon, XIcon } from "lucide-react";
+import { AlertTriangleIcon, CheckIcon, MailIcon, RotateCwIcon, XIcon } from "lucide-react";
 import { useState } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,7 @@ import { STATUS } from "@/lib/status";
 import {
   approveRefundAction,
   completeManuallyAction,
+  emailCustomerAction,
   markSettledAction,
   rejectRefundAction,
   retryRefundAction,
@@ -35,7 +36,8 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 }
 
 /** The actions available for a case, by who is looking and where it is. */
-function CaseActions({ rc, viewer }: { rc: RefundRow; viewer: Viewer }) {
+function CaseActions({ rc, viewer, balancePaise }: { rc: RefundRow; viewer: Viewer; balancePaise: number | null }) {
+  const short = rc.settledBy === "MORBIN" && balancePaise !== null && rc.amountPaise > balancePaise;
   if (viewer === "OWNER") {
     if (rc.status === "REQUESTED") {
       return (
@@ -102,9 +104,18 @@ function CaseActions({ rc, viewer }: { rc: RefundRow; viewer: Viewer }) {
           }
           title="Approve this refund?"
           description={
-            rc.settledBy === "MORBIN"
-              ? "The tickets are voided and the refund is sent to Razorpay straight away."
-              : "The tickets are voided; the organisation pays the customer themselves."
+            <>
+              {rc.settledBy === "MORBIN"
+                ? "The tickets are voided and the refund is sent to Razorpay straight away."
+                : "The tickets are voided; the organisation pays the customer themselves."}
+              {short && (
+                <span className="mt-2 flex items-start gap-1.5 font-medium text-destructive">
+                  <AlertTriangleIcon className="mt-0.5 size-4 shrink-0" />
+                  This is more than the Razorpay balance (<Money paise={balancePaise!} />), so Razorpay will likely
+                  refuse it until more payments come in.
+                </span>
+              )}
+            </>
           }
           label="Note (optional)"
           required={false}
@@ -143,7 +154,17 @@ function CaseActions({ rc, viewer }: { rc: RefundRow; viewer: Viewer }) {
   return null;
 }
 
-function CaseSheet({ rc, viewer, onClose }: { rc: RefundRow | null; viewer: Viewer; onClose: () => void }) {
+function CaseSheet({
+  rc,
+  viewer,
+  balancePaise,
+  onClose,
+}: {
+  rc: RefundRow | null;
+  viewer: Viewer;
+  balancePaise: number | null;
+  onClose: () => void;
+}) {
   return (
     <Sheet open={!!rc} onOpenChange={(o) => !o && onClose()}>
       <SheetContent className="w-full overflow-y-auto sm:max-w-md">
@@ -200,6 +221,44 @@ function CaseSheet({ rc, viewer, onClose }: { rc: RefundRow | null; viewer: View
                   </>
                 )}
               </div>
+              {viewer === "ADMIN" && (
+                <>
+                  <Separator />
+                  <div className="space-y-3 text-sm">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="font-medium">Emails to the customer</p>
+                      <PromptAction
+                        trigger={
+                          <Button variant="outline" size="sm">
+                            <MailIcon data-icon="inline-start" />
+                            Email the customer
+                          </Button>
+                        }
+                        title={`Email ${rc.customerName}`}
+                        description="Sent from Morbin; their reply goes to the support inbox. The email reminds them Morbin never asks for OTPs or passwords — never ask for those, and only ask for bank details when a manual refund needs them."
+                        label="Message"
+                        multiline
+                        minLength={10}
+                        confirmLabel="Send"
+                        action={(text) => emailCustomerAction(rc.id, text)}
+                      />
+                    </div>
+                    {rc.messages.length === 0 ? (
+                      <p className="text-muted-foreground">No emails yet.</p>
+                    ) : (
+                      rc.messages.map((m) => (
+                        <div key={m.id} className="space-y-1 rounded-lg border p-3">
+                          <p className="text-xs text-muted-foreground">
+                            Morbin · <DateTime value={m.createdAt} mode="relative" />
+                            {m.delivery ? ` · ${m.delivery === "SENT" ? "sent" : m.delivery === "FAILED" ? "failed to send" : "sending"}` : ""}
+                          </p>
+                          <p className="whitespace-pre-wrap">{m.message}</p>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </>
+              )}
               <Separator />
               <div className="space-y-2">
                 <Row label="Requested">
@@ -218,7 +277,7 @@ function CaseSheet({ rc, viewer, onClose }: { rc: RefundRow | null; viewer: View
               </div>
             </div>
             <SheetFooter className="flex-row flex-wrap justify-end gap-2">
-              <CaseActions rc={rc} viewer={viewer} />
+              <CaseActions rc={rc} viewer={viewer} balancePaise={balancePaise} />
             </SheetFooter>
           </>
         )}
@@ -227,7 +286,16 @@ function CaseSheet({ rc, viewer, onClose }: { rc: RefundRow | null; viewer: View
   );
 }
 
-export function RefundCasesTable({ rows, viewer }: { rows: RefundRow[]; viewer: Viewer }) {
+export function RefundCasesTable({
+  rows,
+  viewer,
+  balancePaise = null,
+}: {
+  rows: RefundRow[];
+  viewer: Viewer;
+  /** Morbin's Razorpay balance, when known: approving above it shows a warning. */
+  balancePaise?: number | null;
+}) {
   const [open, setOpen] = useState<RefundRow | null>(null);
   const columns: ColumnDef<RefundRow, unknown>[] = [
     {
@@ -295,7 +363,12 @@ export function RefundCasesTable({ rows, viewer }: { rows: RefundRow[]; viewer: 
         }
         initialSorting={[{ id: "createdAt", desc: true }]}
       />
-      <CaseSheet rc={open} viewer={viewer} onClose={() => setOpen(null)} />
+      <CaseSheet
+        rc={open ? (rows.find((r) => r.id === open.id) ?? open) : null}
+        viewer={viewer}
+        balancePaise={balancePaise}
+        onClose={() => setOpen(null)}
+      />
     </>
   );
 }
