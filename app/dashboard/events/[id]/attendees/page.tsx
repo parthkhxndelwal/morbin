@@ -1,17 +1,17 @@
-import { notFound } from "next/navigation";
+import { NoAccessState } from "@/components/patterns/states";
 import { AttendeesTable } from "@/components/features/attendees/attendees-table";
 import { getEventAttendeeRows } from "@/lib/dashboard-data";
-import { getOrgEvent } from "@/lib/events";
-import { requireOrgSession } from "@/lib/guards";
+import { requireEventAccess } from "@/lib/event-access";
 import { can } from "@/lib/permissions";
 
 export const metadata = { title: "Attendees" };
 
 export default async function EventAttendeesPage({ params }: { params: Promise<{ id: string }> }) {
-  const { org, role } = await requireOrgSession();
   const { id } = await params;
-  const event = await getOrgEvent(id, org._id.toString());
-  if (!event) notFound();
+  const { role, event } = await requireEventAccess(id);
+  if (!can(role, "view")) {
+    return <NoAccessState description="Morbin support works on an event's setup and doesn't see its buyers' details." />;
+  }
   const rows = await getEventAttendeeRows(id);
   return (
     <AttendeesTable

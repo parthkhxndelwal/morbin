@@ -1,15 +1,15 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
-import { CalendarIcon, ExternalLinkIcon, MapPinIcon } from "lucide-react";
+import Link from "next/link";
+import { CalendarIcon, ExternalLinkIcon, LifeBuoyIcon, MapPinIcon } from "lucide-react";
 import { BreadcrumbLabel } from "@/components/breadcrumb-labels";
 import { EventTabs, type EventTab } from "@/components/features/events/event-tabs";
 import { CopyButton } from "@/components/patterns/copy-button";
 import { DateTime } from "@/components/patterns/money";
 import { StatusBadge } from "@/components/patterns/status-badge";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { getOrgEvent } from "@/lib/events";
 import { appUrl } from "@/lib/email";
-import { requireOrgSession } from "@/lib/guards";
+import { resolveEventAccess, requireEventAccess } from "@/lib/event-access";
 import { can } from "@/lib/permissions";
 
 export async function generateMetadata({
@@ -17,18 +17,18 @@ export async function generateMetadata({
 }: {
   params: Promise<{ id: string }>;
 }): Promise<Metadata> {
-  const { org } = await requireOrgSession();
   const { id } = await params;
-  const event = await getOrgEvent(id, org._id.toString());
-  const name = event?.title ?? "Event";
+  const access = await resolveEventAccess(id);
+  const name = access && access !== "signed-out" ? access.event.title : "Event";
   // Tab pages ("Orders"…) read "Orders · Fest — Morbin".
   return { title: { default: name, template: `%s · ${name} — Morbin` } };
 }
 
 /**
  * Shared frame for every page of one event: the header (name, status, when,
- * where, public link) and the section tabs. The event is loaded once here,
- * scoped to the caller's organisation, and 404s for anyone else's id.
+ * where, public link) and the section tabs. Access comes from
+ * `requireEventAccess`: the event's own organisation, or a Morbin admin as
+ * support (setup tabs only, with a banner); a 404 for anyone else.
  */
 export default async function EventLayout({
   children,
@@ -37,10 +37,8 @@ export default async function EventLayout({
   children: React.ReactNode;
   params: Promise<{ id: string }>;
 }) {
-  const { org, role } = await requireOrgSession();
   const { id } = await params;
-  const event = await getOrgEvent(id, org._id.toString());
-  if (!event) notFound();
+  const { org, role, event, support } = await requireEventAccess(id);
 
   const ended = event.endsAt < new Date();
   const status = event.status === "PUBLISHED" && ended ? "ENDED" : event.status;
@@ -56,14 +54,35 @@ export default async function EventLayout({
           { label: "Appearance", path: "appearance" },
         ]
       : []),
-    { label: "Orders", path: "orders" },
-    { label: "Attendees", path: "attendees" },
-    { label: "Insights", path: "insights" },
+    ...(can(role, "view")
+      ? [
+          { label: "Orders", path: "orders" },
+          { label: "Attendees", path: "attendees" },
+          { label: "Insights", path: "insights" },
+        ]
+      : []),
   ];
 
   return (
     <div className="space-y-6">
       <BreadcrumbLabel segment={id} label={event.title} />
+      {support && (
+        <Alert>
+          <LifeBuoyIcon />
+          <AlertTitle>Editing as Morbin support for {org.name}</AlertTitle>
+          <AlertDescription>
+            <p>
+              Changes are visible to the organisation: each one is logged and the owner is notified.
+              {org.requireApprovalForSupportChanges
+                ? " This organisation reviews support changes, so booking rules are saved as a draft for the owner to publish, and the event can't be published or cancelled from here."
+                : ""}
+            </p>
+            <Link href={`/dashboard/admin/orgs/${org._id.toString()}`} className="underline underline-offset-4">
+              Back to {org.name}
+            </Link>
+          </AlertDescription>
+        </Alert>
+      )}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 space-y-1.5">
           <div className="flex flex-wrap items-center gap-2">

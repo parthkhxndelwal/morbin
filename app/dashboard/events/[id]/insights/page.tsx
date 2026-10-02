@@ -1,4 +1,5 @@
-import { notFound } from "next/navigation";
+import { can } from "@/lib/permissions";
+import { NoAccessState } from "@/components/patterns/states";
 import { Money } from "@/components/patterns/money";
 import { EmptyState } from "@/components/patterns/states";
 import { Badge } from "@/components/ui/badge";
@@ -12,10 +13,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { getDb } from "@/lib/db";
-import { getEventById } from "@/lib/events";
 import { getActiveFlow } from "@/lib/flows";
 import { formatCount } from "@/lib/format";
-import { requireOrgSession } from "@/lib/guards";
+import { requireEventAccess } from "@/lib/event-access";
 import { ORDER_NET_TICKET_VALUE, SOLD_ORDER_STATUSES } from "@/lib/dashboard-data";
 import type { Order, Ticket } from "@/lib/types";
 
@@ -36,10 +36,11 @@ const IDENTITY_LABELS: Record<string, string> = {
  * precisely so this stays a straightforward aggregation.
  */
 export default async function InsightsPage({ params }: { params: Promise<{ id: string }> }) {
-  const { org } = await requireOrgSession();
   const { id } = await params;
-  const event = await getEventById(id);
-  if (!event || event.organizationId !== org._id.toString()) notFound();
+  const { role, event } = await requireEventAccess(id);
+  if (!can(role, "view")) {
+    return <NoAccessState description="Morbin support works on an event's setup and doesn't see its buyers' details." />;
+  }
   const eventId = event._id!.toString();
 
   const db = await getDb();

@@ -176,7 +176,10 @@ export function FlowBuilder({
   draft,
   eventStatus,
   maxPerType,
+  proposeOnly = false,
 }: {
+  /** Support with the owner's approval switch on: "Publish" becomes "Send to owner". */
+  proposeOnly?: boolean;
   eventId: string;
   ticketTypes: BuilderTicket[];
   customFields: CheckoutField[];
@@ -235,11 +238,13 @@ export function FlowBuilder({
       return;
     }
     setSaved(questions);
-    if (publish) router.refresh();
+    if (body.published) router.refresh();
     toast.success(
-      publish
-        ? "Published. New buyers follow these rules now."
-        : "Draft saved. Buyers still follow the published rules.",
+      body.proposed
+        ? "Saved for the owner to review and publish."
+        : body.published
+          ? "Published. New buyers follow these rules now."
+          : "Draft saved. Buyers still follow the published rules.",
     );
   }
 
@@ -265,6 +270,7 @@ export function FlowBuilder({
           blocked={blocked}
           onSave={() => save(false)}
           onPublish={() => save(true)}
+          publishLabel={proposeOnly ? "Send to owner" : "Publish"}
           onDiscard={() => setQuestions(saved)}
         />
 
@@ -372,6 +378,7 @@ function StatusBar({
   onSave,
   onPublish,
   onDiscard,
+  publishLabel,
 }: {
   unsaved: boolean;
   draftPending: boolean;
@@ -381,6 +388,7 @@ function StatusBar({
   onSave: () => void;
   onPublish: () => void;
   onDiscard: () => void;
+  publishLabel: string;
 }) {
   const changed = unsaved || draftPending;
   const message = unsaved
@@ -418,7 +426,7 @@ function StatusBar({
           )}
           <Button size="sm" onClick={onPublish} disabled={busy !== "" || blocked || !changed}>
             {busy === "publish" && <Spinner data-icon="inline-start" />}
-            Publish
+            {publishLabel}
           </Button>
         </div>
       </CardContent>

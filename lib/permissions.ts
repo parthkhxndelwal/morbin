@@ -40,12 +40,20 @@ export type Capability =
   /** Invite and remove members. */
   | "manageTeam";
 
-const GRANTS: Record<OrgRole, readonly Capability[]> = {
+/**
+ * SUPPORT is a Morbin admin working on one organisation's event on its behalf:
+ * it can fix the event's setup, and deliberately nothing else — no money, no
+ * refunds, no exports, and no buyers' personal data (no "view").
+ */
+export type AccessRole = OrgRole | "SUPPORT";
+
+const GRANTS: Record<AccessRole, readonly Capability[]> = {
+  SUPPORT: ["manageEvents"],
   OWNER: ["view", "checkIn", "manageEvents", "refund", "export", "finance", "manageTeam"],
   MEMBER: ["view", "checkIn"],
 };
 
-export function can(role: OrgRole | null | undefined, capability: Capability): boolean {
+export function can(role: AccessRole | null | undefined, capability: Capability): boolean {
   if (!role) return false;
   return GRANTS[role].includes(capability);
 }

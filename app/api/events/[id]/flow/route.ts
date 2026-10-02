@@ -1,16 +1,17 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { auth } from "@/lib/auth";
-import { getEventById } from "@/lib/events";
 import { getActiveFlow, getFlowDraft, publishFlow, saveFlowDraft } from "@/lib/flows";
-import { getOrgForUser } from "@/lib/organizations";
+import { eventApiAccess } from "@/lib/event-access";
 import { can } from "@/lib/permissions";
+import { recordSupportChange, supportNeedsApproval } from "@/lib/support";
 import type { FlowStep } from "@/lib/types";
 
 /**
  * Read and edit an event's booking flow.
  *
- * Owner-only, matching every other organizer write in this app. Publishing bumps
+ * The event's owner, or Morbin support (logged, and the owner notified; with the
+ * owner's approval switch on, a support "publish" is saved as a draft for the
+ * owner to publish). Publishing bumps
  * the version rather than mutating the live document, so a buyer mid-checkout is
  * never moved to new rules underneath.
  */
@@ -84,16 +85,12 @@ export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { id } = await params;
-  const resolved = await getOrgForUser(session.user.id);
-  const org = resolved?.org;
-  const event = await getEventById(id);
-  if (!org?._id || !event || event.organizationId !== org._id.toString()) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
-  const [published, draft] = await Promise.all([getActiveFlow(event._id!.toString()), getFlowDraft(event._id!.toString())]);
+  const r = await eventApiAccess(id);
+  if ("error" in r) return NextResponse.json({ error: r.error }, { status: r.status });
+  if (!can(r.access.role, "manageEvents")) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  const eventId = r.access.event._id.toString();
+  const [published, draft] = await Promise.all([getActiveFlow(eventId), getFlowDraft(eventId)]);
   return NextResponse.json({ published, draft });
 }
 
@@ -101,18 +98,12 @@ export async function PUT(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { id } = await params;
-  const resolved = await getOrgForUser(session.user.id);
-  const org = resolved?.org;
-  if (!org?._id) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  if (!can(resolved?.role, "manageEvents")) {
-    return NextResponse.json({ error: "Only the owner can change the booking flow" }, { status: 403 });
-  }
-  const event = await getEventById(id);
-  if (!event || event.organizationId !== org._id.toString()) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  const r = await eventApiAccess(id);
+  if ("error" in r) return NextResponse.json({ error: r.error }, { status: r.status });
+  const { access } = r;
+  if (!can(access.role, "manageEvents")) {
+    return NextResponse.json({ error: "Only the owner can change who can book" }, { status: 403 });
   }
 
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));
@@ -122,9 +113,26 @@ export async function PUT(
   const problem = validate(parsed.data);
   if (problem) return NextResponse.json({ error: problem }, { status: 400 });
 
-  const eventId = event._id!.toString();
-  const flow = parsed.data.publish
+  const eventId = access.event._id.toString();
+  // With the owner's approval switch on, support prepares and the owner publishes.
+  const proposed = access.support && !!parsed.data.publish && supportNeedsApproval(access.org);
+  const publish = !!parsed.data.publish && !proposed;
+  const flow = publish
     ? await publishFlow(eventId, parsed.data.steps)
     : await saveFlowDraft(eventId, parsed.data.steps);
-  return NextResponse.json({ flow, published: !!parsed.data.publish });
+
+  if (access.support) {
+    await recordSupportChange({
+      adminId: access.userId,
+      organizationId: access.org._id.toString(),
+      eventId,
+      action: publish ? "event.flow.published" : "event.flow.draft_saved",
+      summary: proposed
+        ? `Booking rules for "${access.event.title}" were prepared for you. Review and publish them under Booking rules.`
+        : publish
+          ? `Booking rules for "${access.event.title}" were changed and published.`
+          : `A draft of the booking rules for "${access.event.title}" was saved.`,
+    });
+  }
+  return NextResponse.json({ flow, published: publish, proposed });
 }

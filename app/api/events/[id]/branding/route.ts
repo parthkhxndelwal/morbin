@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { auth } from "@/lib/auth";
 import { getBranding, saveBranding } from "@/lib/branding";
-import { getEventById } from "@/lib/events";
 import {
   ALLOWED,
   MAX_BYTES,
@@ -11,7 +9,8 @@ import {
   mediaBucket,
   mediaUrl,
 } from "@/lib/media";
-import { getOrgForUser } from "@/lib/organizations";
+import { eventApiAccess } from "@/lib/event-access";
+import { recordSupportChange } from "@/lib/support";
 import { can } from "@/lib/permissions";
 import type { CustomFieldType } from "@/lib/types";
 
@@ -53,19 +52,12 @@ const bodySchema = z.object({
 });
 
 async function guard(eventId: string) {
-  const session = await auth();
-  if (!session?.user?.id) return { error: "Unauthorized", status: 401 } as const;
-  const resolved = await getOrgForUser(session.user.id);
-  const org = resolved?.org;
-  if (!org?._id) return { error: "Not found", status: 404 } as const;
-  if (!can(resolved?.role, "manageEvents")) {
+  const r = await eventApiAccess(eventId);
+  if ("error" in r) return r;
+  if (!can(r.access.role, "manageEvents")) {
     return { error: "Only the organization owner can change this", status: 403 } as const;
   }
-  const event = await getEventById(eventId);
-  if (!event || event.organizationId !== org._id.toString()) {
-    return { error: "Not found", status: 404 } as const;
-  }
-  return { org, event } as const;
+  return { org: r.access.org, event: r.access.event, access: r.access } as const;
 }
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -143,6 +135,15 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       type: f.type as CustomFieldType,
     })),
   });
+  if (g.access.support) {
+    await recordSupportChange({
+      adminId: g.access.userId,
+      organizationId: g.access.org._id.toString(),
+      eventId: id,
+      action: "event.appearance.updated",
+      summary: `The look of "${g.event.title}" and its checkout questions were updated.`,
+    });
+  }
   return NextResponse.json({
     ok: true,
     branding: {

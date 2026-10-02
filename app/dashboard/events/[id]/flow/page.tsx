@@ -1,10 +1,10 @@
-import { notFound } from "next/navigation";
 import { NoAccessState } from "@/components/patterns/states";
 import { getBranding } from "@/lib/branding";
-import { getEventById, getTicketTypes } from "@/lib/events";
+import { getTicketTypes } from "@/lib/events";
 import { getActiveFlow, getFlowDraft, MAX_PER_TYPE_PER_ORDER } from "@/lib/flows";
-import { requireOrgSession } from "@/lib/guards";
+import { requireEventAccess } from "@/lib/event-access";
 import { can } from "@/lib/permissions";
+import { supportNeedsApproval } from "@/lib/support";
 import type { TicketType } from "@/lib/types";
 import { FlowBuilder } from "./builder";
 
@@ -16,10 +16,8 @@ export const metadata = { title: "Booking rules" };
  * what the organiser sees is what a buyer is offered.
  */
 export default async function FlowBuilderPage({ params }: { params: Promise<{ id: string }> }) {
-  const { org, role } = await requireOrgSession();
   const { id } = await params;
-  const event = await getEventById(id);
-  if (!event || event.organizationId !== org._id.toString()) notFound();
+  const { role, event, org, support } = await requireEventAccess(id);
   const eventId = event._id!.toString();
 
   if (!can(role, "manageEvents")) {
@@ -57,6 +55,7 @@ export default async function FlowBuilderPage({ params }: { params: Promise<{ id
       draft={draft ? { steps: draft.steps } : null}
       eventStatus={event.status}
       maxPerType={MAX_PER_TYPE_PER_ORDER}
+      proposeOnly={support && supportNeedsApproval(org)}
     />
   );
 }

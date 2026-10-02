@@ -1,9 +1,7 @@
-import { notFound } from "next/navigation";
 import { PageHeader } from "@/components/patterns/page-header";
 import { NoAccessState } from "@/components/patterns/states";
 import { getBranding } from "@/lib/branding";
-import { getEventById } from "@/lib/events";
-import { requireOrgSession } from "@/lib/guards";
+import { requireEventAccess } from "@/lib/event-access";
 import { can } from "@/lib/permissions";
 import { AppearanceEditor } from "./editor";
 
@@ -20,10 +18,8 @@ export default async function AppearancePage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  const { org, role } = await requireOrgSession();
   const { id } = await params;
-  const event = await getEventById(id);
-  if (!event || event.organizationId !== org._id.toString()) notFound();
+  const { role, event } = await requireEventAccess(id);
 
   if (!can(role, "manageEvents")) {
     return (

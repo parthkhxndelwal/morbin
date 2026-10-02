@@ -18,7 +18,8 @@ import {
 import { createEventWithDefaults, updateEventSlug } from "@/lib/events";
 import { err, ok, zodFieldErrors, type Result } from "@/lib/result";
 import { TxAbort } from "@/lib/tx";
-import type { Event, TicketTypeStatus } from "@/lib/types";
+import { APPROVAL_REQUIRED_MESSAGE, supportNeedsApproval } from "@/lib/support";
+import type { Event, Organization, TicketTypeStatus } from "@/lib/types";
 import { eventDetailsSchema, ticketTypeSchema } from "@/lib/validations";
 
 /**
@@ -48,6 +49,19 @@ async function noteSupportChange(actor: EventActor, eventId: string, what: strin
     body: what,
     link: `/dashboard/events/${eventId}`,
   });
+}
+
+/**
+ * With the owner's "support changes need my approval" switch on, support may
+ * not make an event go live, go dark or get cancelled.
+ */
+async function supportBlocked(actor: EventActor): Promise<string | null> {
+  if (actor.capacity !== "ADMIN") return null;
+  const db = await getDb();
+  const org = await db
+    .collection<Organization>("organizations")
+    .findOne({ _id: toObjectId(actor.organizationId)! }, { projection: { requireApprovalForSupportChanges: 1 } });
+  return org && supportNeedsApproval(org) ? APPROVAL_REQUIRED_MESSAGE : null;
 }
 
 function refresh(eventId: string) {
@@ -108,6 +122,8 @@ export async function updateEventDetailsAction(eventId: string, formData: FormDa
 export async function setEventStatusAction(eventId: string, next: "PUBLISHED" | "DRAFT"): Promise<Result> {
   const guard = await eventEditor(eventId);
   if ("error" in guard) return err(guard.error);
+  const blocked = await supportBlocked(guard.actor);
+  if (blocked) return err(blocked);
   return run(async () => {
     await setEventStatus(guard.actor, eventId, next);
     await noteSupportChange(guard.actor, eventId, next === "PUBLISHED" ? "Your event was published." : "Your event was unpublished.");
@@ -125,6 +141,8 @@ export async function cancelEventAction(eventId: string, reason: string): Promis
   const guard = await eventEditor(eventId);
   if ("error" in guard) return err(guard.error);
   if (reason.trim().length < 5) return err("Tell buyers why (at least 5 characters).");
+  const blocked = await supportBlocked(guard.actor);
+  if (blocked) return err(blocked);
   return run(async () => {
     const r = await cancelEvent(guard.actor, eventId, reason.trim());
     await noteSupportChange(guard.actor, eventId, "Your event was cancelled and refunds were requested.");

@@ -162,3 +162,24 @@ export async function savePayoutAccountAction(
     return { last4: view.last4, rotated };
   }, rotated ? "Payout bank details saved" : "Payout bank details updated");
 }
+
+/** "Support changes need my approval": Morbin support prepares, the owner makes it live. */
+export async function setSupportApprovalAction(on: boolean): Promise<Result> {
+  const guard = await orgActor("finance", { allowSuspended: true });
+  if ("error" in guard) return err(guard.error);
+  return run(async () => {
+    const db = await getDb();
+    await db
+      .collection<Organization>("organizations")
+      .updateOne({ _id: toObjectId(guard.actor.orgId) as never }, { $set: { requireApprovalForSupportChanges: on, updatedAt: new Date() } });
+    await audit({
+      actorId: guard.actor.userId,
+      actorRole: guard.actor.role,
+      action: "organization.supportApproval.changed",
+      targetType: "organization",
+      targetId: guard.actor.orgId,
+      organizationId: guard.actor.orgId,
+      meta: { on },
+    });
+  }, on ? "Support changes now need your approval" : "Support can make changes directly");
+}

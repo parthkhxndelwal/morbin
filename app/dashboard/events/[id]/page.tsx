@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
 import { IndianRupeeIcon, ReceiptIcon, ScanLineIcon, TicketIcon } from "lucide-react";
 import { EventStatusCard } from "@/components/features/events/event-status-card";
 import { OrdersTable } from "@/components/features/orders/orders-table";
@@ -9,17 +8,14 @@ import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getEventOverview, getOrgOrderRows } from "@/lib/dashboard-data";
 import { publishBlockers } from "@/lib/event-service";
-import { getOrgEvent } from "@/lib/events";
 import { formatCount, formatINR } from "@/lib/format";
-import { requireOrgSession } from "@/lib/guards";
+import { requireEventAccess } from "@/lib/event-access";
 import { can } from "@/lib/permissions";
 
 export default async function EventOverviewPage({ params }: { params: Promise<{ id: string }> }) {
-  const { org, role } = await requireOrgSession();
   const { id } = await params;
+  const { org, role, event } = await requireEventAccess(id);
   const orgId = org._id.toString();
-  const event = await getOrgEvent(id, orgId);
-  if (!event) notFound();
 
   const canManage = can(role, "manageEvents") && org.status !== "SUSPENDED";
   const ended = event.endsAt < new Date();
@@ -27,7 +23,8 @@ export default async function EventOverviewPage({ params }: { params: Promise<{ 
   const [overview, blockers, recentOrders] = await Promise.all([
     getEventOverview(id, orgId),
     event.status === "DRAFT" ? publishBlockers(orgId, id) : Promise.resolve([]),
-    getOrgOrderRows(orgId, { eventId: id, limit: 6 }),
+    // Support works on setup only and never sees buyers.
+    can(role, "view") ? getOrgOrderRows(orgId, { eventId: id, limit: 6 }) : Promise.resolve(null),
   ]);
   const checkinRate =
     overview.ticketsLive > 0 ? Math.round((overview.checkedIn / overview.ticketsLive) * 100) : 0;
@@ -71,6 +68,7 @@ export default async function EventOverviewPage({ params }: { params: Promise<{ 
 
       <TicketTypesCard eventId={id} rows={overview.ticketTypes} canManage={canManage} locked={locked} />
 
+      {recentOrders && (
       <Card>
         <CardHeader>
           <CardTitle>Latest orders</CardTitle>
@@ -85,6 +83,7 @@ export default async function EventOverviewPage({ params }: { params: Promise<{ 
           <OrdersTable rows={recentOrders} showEvent={false} compact />
         </CardContent>
       </Card>
+      )}
     </div>
   );
 }

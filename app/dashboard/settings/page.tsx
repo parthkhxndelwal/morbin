@@ -1,6 +1,7 @@
 import { FeeBearerForm } from "@/components/features/settings/fee-bearer-form";
 import { OrgProfileForm } from "@/components/features/settings/org-profile-form";
 import { PayoutAccountForm } from "@/components/features/settings/payout-account-form";
+import { SupportApprovalCard } from "@/components/features/settings/support-approval-card";
 import { PageHeader } from "@/components/patterns/page-header";
 import { NoAccessState } from "@/components/patterns/states";
 import { requireOrgSession } from "@/lib/guards";
@@ -62,6 +63,7 @@ export default async function SettingsPage() {
           encryption={payoutEncryptionState()}
           disabled={disabled}
         />
+        <SupportApprovalCard initial={!!org.requireApprovalForSupportChanges} />
       </div>
     </div>
   );

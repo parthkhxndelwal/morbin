@@ -1,4 +1,7 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
+import { LifeBuoyIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import {
   AdminMembers,
   DataCard,
@@ -111,6 +114,7 @@ export default async function AdminOrgPage({ params }: { params: Promise<{ id: s
                     <TableHead>Event</TableHead>
                     <TableHead>Starts</TableHead>
                     <TableHead>Status</TableHead>
+                    <TableHead className="w-0" />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -122,6 +126,12 @@ export default async function AdminOrgPage({ params }: { params: Promise<{ id: s
                       </TableCell>
                       <TableCell>
                         <StatusBadge kind="event" value={e.status} />
+                      </TableCell>
+                      <TableCell>
+                        <Button variant="outline" size="sm" nativeButton={false} render={<Link href={`/dashboard/events/${e.id}`} />}>
+                          <LifeBuoyIcon data-icon="inline-start" />
+                          Open as support
+                        </Button>
                       </TableCell>
                     </TableRow>
                   ))}
