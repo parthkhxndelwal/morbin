@@ -8,6 +8,11 @@ const guides = [
     blurb: "How an event goes from a draft to tickets in buyers' inboxes.",
   },
   {
+    slug: "roles",
+    title: "Roles and access",
+    blurb: "Who can create events, who can run the door, and how members are labelled.",
+  },
+  {
     slug: "creating-events",
     title: "Creating events",
     blurb: "Drafts, publishing rules, and what each event field controls.",

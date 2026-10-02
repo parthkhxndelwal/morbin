@@ -52,3 +52,6 @@ graphify-out/
 # self-hosted runtime data
 /data/
 /backups/
+
+# Local dev server output: holds request URLs (magic-link tokens) and DB hosts
+dev.log

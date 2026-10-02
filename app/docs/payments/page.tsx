@@ -2,14 +2,14 @@ import { DocArticle, docsMetadata } from "../doc-article";
 
 export const metadata = docsMetadata(
   "Payments & payouts",
-  "Platform fees, Razorpay settlement, and refunds.",
+  "Platform fees, scheduled bank payouts, and refunds.",
 );
 
 export default function PaymentsPage() {
   return (
     <DocArticle
       title="Payments & payouts"
-      intro="Buyers pay through Razorpay. Morbin takes a small platform fee and transfers the remainder to your linked account."
+      intro="Buyers pay through Razorpay. Morbin takes a small platform fee, holds your share as a balance, and pays it out to your bank account on a fixed schedule."
       sections={[
         {
           h: "The platform fee",
@@ -21,15 +21,15 @@ export default function PaymentsPage() {
         },
         {
           h: "Settlement",
-          p: "Once a payment is captured, your share is transferred to your Razorpay linked account automatically. The transfer runs after ticket fulfilment and never blocks it — a failed transfer leaves your tickets delivered and the failure recorded against the order, so it can be retried without re-charging the buyer.",
+          p: "Morbin is the merchant of record for every sale. When a payment is captured, your share is credited to your Morbin balance and nothing is moved at that moment — tickets are issued and emailed immediately, and settlement happens separately afterwards in a scheduled payout. A payout problem therefore never delays a buyer getting their ticket.",
         },
         {
           h: "Verification",
-          p: "You must be verified before publishing paid events. Verification is handled by the Morbin team against your Razorpay linked account, not self-service. Your dashboard shows your current status, and paid publishing unlocks once it reads verified.",
+          p: "You must be verified before publishing paid events. Verification is handled by the Morbin team, not self-service, and covers the bank details payouts are sent to. Your dashboard shows your current status, and paid publishing unlocks once it reads verified.",
         },
         {
           h: "Refunds",
-          p: "An owner can issue a full refund from the event's order list. The refund reverses the organizer transfer, returns the money to the buyer, voids every ticket in the order, and returns the seats to capacity. Only paid orders are refundable, and the order is claimed atomically so a double-click cannot refund twice.",
+          p: "An owner can issue a full refund from the event's order list. The refund returns the buyer's money, voids every ticket in the order, and returns the seats to capacity. Only paid orders are refundable, and the order is claimed atomically so a double-click cannot refund twice. If the money has already been paid out to your bank, the refund reduces your Morbin balance instead.",
         },
         {
           h: "What is verified before fulfilment",

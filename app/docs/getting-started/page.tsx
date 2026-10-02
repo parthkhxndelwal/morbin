@@ -13,7 +13,7 @@ export default function GettingStartedPage() {
       sections={[
         {
           h: "1. Your organization is set up",
-          p: "Before you can publish anything, an administrator creates an organization for you and attaches your Razorpay linked account. Once that organization is marked verified, you can accept money and publish paid events. Until then, draft events are fully available — you can build the whole event and publish later.",
+          p: "Before you can publish anything, an administrator creates an organization for you and collects the bank details payouts are sent to. Once that organization is marked verified, you can accept money and publish paid events. Until then, draft events are fully available — you can build the whole event and publish later.",
         },
         {
           h: "2. Draft your event",
@@ -29,7 +29,7 @@ export default function GettingStartedPage() {
         },
         {
           h: "5. Sell and settle",
-          p: "Buyers pay on the public event page. When payment clears, tickets are generated and emailed to each attendee automatically, and your share is transferred to your linked account. You do not need to do anything manually.",
+          p: "Buyers pay on the public event page. When payment clears, tickets are generated and emailed to each attendee automatically, and your share is credited to your Morbin balance. You do not need to do anything manually — see Payments & payouts for how and when that balance reaches your bank.",
         },
       ]}
       next={{ href: "/docs/creating-events", title: "Creating events" }}

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { EarlyAccessForm } from "@/components/early-access-form";
 import { HeroTitle } from "@/components/hero-title";
 import { LightTunnel } from "@/components/light-tunnel";
+import { Logo } from "@/components/logo";
 
 export default function Home() {
   return (
@@ -47,7 +48,7 @@ export default function Home() {
 
       {/* logo only — no nav */}
       <header className="relative z-10 mx-auto w-full max-w-7xl shrink-0 px-6 pt-5 sm:px-10 sm:pt-7">
-        <span className="text-base font-extrabold lowercase tracking-tight sm:text-lg">morbin</span>
+        <Logo height={22} />
       </header>
 
       <main className="relative z-10 mx-auto flex w-full max-w-7xl min-h-0 flex-1 items-center px-6 sm:px-10">
