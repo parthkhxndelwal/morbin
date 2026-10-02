@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 
 export function VerifyEmail({ token }: { token: string }) {
   const [state, setState] = useState<"loading" | "ok" | "bad">(
@@ -31,11 +32,11 @@ export function VerifyEmail({ token }: { token: string }) {
 
   if (state === "ok")
     return (
-      <div>
+      <div className="space-y-3">
         <p className="font-semibold">Email verified.</p>
-        <a href="/auth" className="mt-2 inline-block text-sm text-white underline">
+        <Link href="/auth" className="inline-block text-sm text-white underline">
           Sign in to continue
-        </a>
+        </Link>
       </div>
     );
 

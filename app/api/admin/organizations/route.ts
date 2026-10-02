@@ -12,7 +12,7 @@ const createSchema = z.object({
   ownerName: z.string().max(80).default(""),
   ownerEmail: z.string().email(),
   ownerPassword: z.string().optional(),
-  razorpayAccountId: z.string().max(80).optional(),
+  type: z.enum(["EVENT", "INSTITUTION", "CORPORATE"]).optional(),
   paymentAccountStatus: z
     .enum(["NOT_STARTED", "PENDING", "VERIFIED", "REJECTED", "RESTRICTED"])
     .optional(),
@@ -42,9 +42,13 @@ export async function POST(request: Request) {
   }
 }
 
-export function adminErrorResponse(error: unknown) {
+/**
+ * Shared 4xx/5xx mapper: an AdminError carries the status it wants, anything
+ * else is an unexpected failure that must not leak its message.
+ */
+export function adminErrorResponse(error: unknown, tag = "[admin]") {
   if (error instanceof AdminError)
     return NextResponse.json({ error: error.message }, { status: error.status });
-  console.error("[admin]", error);
+  console.error(tag, error);
   return NextResponse.json({ error: "Something went wrong" }, { status: 500 });
 }

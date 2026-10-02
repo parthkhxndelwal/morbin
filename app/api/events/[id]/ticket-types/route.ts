@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { createTicketType, getEventById, getTicketTypes } from "@/lib/events";
-import { getOrgByOwner } from "@/lib/organizations";
+import { getOrgForUser } from "@/lib/organizations";
+import { can } from "@/lib/permissions";
 
 const schema = z.object({
   name: z.string().min(2).max(80),
@@ -21,7 +22,9 @@ export async function GET(
   if (!session?.user?.id)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { id } = await params;
-  const org = await getOrgByOwner(session.user.id);
+  // Any member may read the ticket types of their organization's event.
+  const resolved = await getOrgForUser(session.user.id);
+  const org = resolved?.org;
   const event = await getEventById(id);
   if (!event || !org?._id || event.organizationId !== org._id.toString())
     return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -42,7 +45,16 @@ export async function POST(
   const parsed = schema.safeParse(await request.json().catch(() => null));
   if (!parsed.success)
     return NextResponse.json({ error: "Invalid ticket type" }, { status: 400 });
-  const org = await getOrgByOwner(session.user.id);
+  const resolved = await getOrgForUser(session.user.id);
+  const org = resolved?.org;
+  if (!org || !org._id)
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  // Adding a ticket type is owner-only; refuse before we do any work.
+  if (!can(resolved?.role, "manageEvents"))
+    return NextResponse.json(
+      { error: "Only the organization owner can add ticket types" },
+      { status: 403 },
+    );
   const event = await getEventById(id);
   if (!event || !org?._id || event.organizationId !== org._id.toString())
     return NextResponse.json({ error: "Not found" }, { status: 404 });

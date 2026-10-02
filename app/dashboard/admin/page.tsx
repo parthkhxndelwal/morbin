@@ -13,7 +13,8 @@ export default async function AdminPage() {
     <div>
       <h1 className="text-2xl font-bold tracking-tight">Organizations</h1>
       <p className="mt-1 text-sm text-neutral-400">
-        Create organizations, attach their Razorpay linked account, and approve them.
+        Create organizations, verify them, approve them, and manage who belongs to
+        them.
       </p>
       <div className="mt-8">
         <AdminOrgs initialRows={rows} />

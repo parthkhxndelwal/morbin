@@ -33,6 +33,7 @@ export const authConfig = {
         token.organizationRole = user.organizationRole ?? null;
         token.onboardingStatus = user.onboardingStatus ?? null;
         token.paymentAccountStatus = user.paymentAccountStatus ?? null;
+        token.role = user.role ?? null;
       }
       if (trigger === "update" && session) {
         if (typeof session.organizationId !== "undefined")
@@ -43,6 +44,7 @@ export const authConfig = {
           token.onboardingStatus = session.onboardingStatus;
         if (typeof session.paymentAccountStatus !== "undefined")
           token.paymentAccountStatus = session.paymentAccountStatus;
+        if (typeof session.role !== "undefined") token.role = session.role;
       }
       return token;
     },
@@ -54,6 +56,7 @@ export const authConfig = {
         session.user.onboardingStatus = (token.onboardingStatus as string | null) ?? null;
         session.user.paymentAccountStatus =
           (token.paymentAccountStatus as string | null) ?? null;
+        session.user.role = (token.role as string | null) ?? null;
       }
       return session;
     },

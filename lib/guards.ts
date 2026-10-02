@@ -1,12 +1,18 @@
 import { redirect } from "next/navigation";
 import type { ObjectId } from "mongodb";
 import { auth } from "@/lib/auth";
-import { isAdminEmail } from "@/lib/config";
-import { getOrgByOwner } from "@/lib/organizations";
-import type { Organization } from "@/lib/types";
+import { can, type Capability } from "@/lib/permissions";
+import { getOrgForUser } from "@/lib/organizations";
+import type { Organization, OrgRole } from "@/lib/types";
 
 /** An org that made it out of the database always carries its `_id`. */
 type ResolvedOrg = Organization & { _id: ObjectId };
+
+export interface OrgSession {
+  userId: string;
+  org: ResolvedOrg;
+  role: OrgRole;
+}
 
 /**
  * Session + organization guard for the organizer dashboard pages. It redirects
@@ -16,21 +22,50 @@ type ResolvedOrg = Organization & { _id: ObjectId };
  *   admin allowlisted     → /dashboard/admin
  *   signed in, no org yet → /auth
  *
- * app/dashboard/layout.tsx already enforces the org for non-admins, so the
- * lookup below is redundant as a gate — it stays because these pages need the
- * org document itself (name, payment status, `org._id`).
+ * Membership is resolved through `memberships`, so a MEMBER — who does not own
+ * the organization — reaches their dashboard exactly as an OWNER does.
  *
  * The admin hop must live in a page, not in app/dashboard/layout.tsx: that
  * layout also wraps /dashboard/admin, so redirecting there would loop.
  */
-export async function requireOrgSession(): Promise<{ userId: string; org: ResolvedOrg }> {
+export async function requireOrgSession(): Promise<OrgSession> {
   const session = await auth();
   if (!session?.user?.id) redirect("/auth");
   // Admins need not own an organization; send them where they belong in one
   // hop instead of bouncing them out through /auth and back in again.
-  if (isAdminEmail(session.user.email)) redirect("/dashboard/admin");
-  const org = await getOrgByOwner(session.user.id);
-  if (!org || !org._id) redirect("/auth");
-  // Rebuilt so the caller sees a non-optional `_id` without a cast.
-  return { userId: session.user.id, org: { ...org, _id: org._id } };
+  if (session.user.role === "ADMIN") redirect("/dashboard/admin");
+
+  const resolved = await getOrgForUser(session.user.id);
+  if (!resolved?.org._id) redirect("/auth");
+
+  return {
+    userId: session.user.id,
+    // Rebuilt so the caller sees a non-optional `_id` without a cast.
+    org: { ...resolved.org, _id: resolved.org._id },
+    role: resolved.role,
+  };
 }
+
+/**
+ * Same guard, for pages and handlers that may only be performed by an OWNER —
+ * creating and publishing events, adding ticket types, issuing refunds.
+ * A MEMBER gets a 403 rather than a redirect, because the page itself is
+ * legitimate for them; only the action is not.
+ */
+export async function requireOwnerSession(): Promise<OrgSession> {
+  const ctx = await requireOrgSession();
+  if (ctx.role !== "OWNER") throw new ForbiddenError();
+  return ctx;
+}
+
+/** Thrown by the guards; route handlers map it to a 403 response. */
+export class ForbiddenError extends Error {
+  readonly status = 403;
+  constructor(message = "You do not have permission to do that.") {
+    super(message);
+  }
+}
+
+/** Re-exported so handlers can write `can(ctx.role, "manageEvents")`. */
+export { can };
+export type { Capability };
