@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { orgActor } from "@/lib/action-guards";
 import { audit } from "@/lib/audit";
 import { getDb, toObjectId } from "@/lib/db";
+import { gstStateName } from "@/lib/invoice-rules";
 import {
   getPayoutAccountView,
   isEncryptionNotConfigured,
@@ -66,6 +67,8 @@ export async function updateOrgProfileAction(formData: FormData): Promise<Result
   const parsed = orgProfileSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return err(INVALID, zodFieldErrors(parsed.error.issues));
   const v = parsed.data;
+  // With a GSTIN the state is implied by it (its first two digits).
+  const stateCode = v.stateCode ?? (v.gstin ? String(v.gstin).slice(0, 2) : null);
 
   return run(async () => {
     const db = await getDb();
@@ -78,6 +81,8 @@ export async function updateOrgProfileAction(formData: FormData): Promise<Result
           contactPhone: v.contactPhone,
           gstin: v.gstin,
           address: v.address,
+          stateCode,
+          state: gstStateName(stateCode),
           updatedAt: new Date(),
         },
       },
@@ -91,7 +96,7 @@ export async function updateOrgProfileAction(formData: FormData): Promise<Result
       organizationId: guard.actor.orgId,
       // Field names only: an audit log is a durable record and must never hold
       // the values it describes.
-      meta: { fields: ["name", "contactEmail", "contactPhone", "gstin", "address"] },
+      meta: { fields: ["name", "contactEmail", "contactPhone", "gstin", "address", "state"] },
     });
   }, "Organisation profile saved");
 }

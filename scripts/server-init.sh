@@ -36,7 +36,6 @@ sed \
   -e "s|^MONGO_APP_PASSWORD=.*|MONGO_APP_PASSWORD=$(gen)|" \
   -e "s|^AUTH_SECRET=.*|AUTH_SECRET=$(gen)|" \
   -e "s|^TICKET_SECRET=.*|TICKET_SECRET=$(gen)|" \
-  -e "s|^CRON_SECRET=.*|CRON_SECRET=$(gen)|" \
   -e "s|^BACKUP_PASSPHRASE=.*|BACKUP_PASSPHRASE=$(gen)|" \
   -e "s|^BACKUP_DIR=.*|BACKUP_DIR=$BASE/backups|" \
   "$BASE/.env.template" > "$BASE/.env"

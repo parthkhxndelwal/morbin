@@ -165,6 +165,7 @@ export function OwnerCard({ org }: { org: AdminOrgDetail }) {
         <Row label="Phone">{org.contact.phone ?? "—"}</Row>
         <Row label="GSTIN">{org.contact.gstin ?? "—"}</Row>
         <Row label="Address">{org.contact.address ?? "—"}</Row>
+        <Row label="State">{org.contact.state ?? "—"}</Row>
         <Row label="Public slug">
           <span className="font-mono">{org.slug}</span>
         </Row>

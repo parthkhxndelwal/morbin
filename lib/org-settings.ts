@@ -74,6 +74,8 @@ export interface OrgSettingsView {
   /** Uppercased, or "" when the organisation has no GSTIN. */
   gstin: string;
   address: string;
+  /** GST state code, or "". */
+  stateCode: string;
 }
 
 /**
@@ -90,5 +92,6 @@ export function getOrgSettingsView(org: Organization): OrgSettingsView {
     contactPhone: org.contactPhone ?? "",
     gstin: (org.gstin ?? "").toUpperCase(),
     address: org.address ?? "",
+    stateCode: org.stateCode ?? "",
   };
 }
