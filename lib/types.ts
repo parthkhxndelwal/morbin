@@ -169,6 +169,8 @@ export interface Event {
   /** Overrides the organisation's fee bearer for this event. Null = org default. */
   feeBearer?: FeeBearer | null;
   cancelledAt?: Date | null;
+  /** Retention: when attendee data was anonymised (lib/retention.ts). */
+  piiPurgedAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }

@@ -143,6 +143,10 @@ export async function ensureIndexes(): Promise<void> {
     // One ticket per dataset row per event (lookup questions); see lib/lookups.
     db.collection("datasetClaims").createIndex({ datasetId: 1, key: 1, eventId: 1 }, { unique: true }),
     db.collection("datasetClaims").createIndex({ orderId: 1 }),
+    // Retention job: events past retention, and the date-based purges.
+    db.collection("events").createIndex({ piiPurgedAt: 1, endsAt: 1 }),
+    db.collection("invoices").createIndex({ issuedAt: 1 }),
+    db.collection("checkoutSessions").createIndex({ createdAt: 1 }),
     // Data requests (DPDP): find everything held for one address, and the queue.
     db.collection("orders").createIndex({ buyerEmail: 1 }),
     db.collection("orders").createIndex({ "attendees.email": 1 }),
