@@ -469,8 +469,9 @@ export async function flushEmailQueue(limit = 20): Promise<{ sent: number; faile
             sentAt: new Date(),
             providerMessageId: r.dev ? "dev-skip" : (r.id ?? null),
             "meta.qrSvg": null,
-            // A join link is a credential; once delivered it has no reason to stay here.
+            // A join link or sign-in code is a credential; once delivered it has no reason to stay here.
             "meta.link": null,
+            "meta.otpCode": null,
           },
           $inc: { attempts: 1 },
         },
