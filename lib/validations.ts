@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { MIN_PASSWORD_LENGTH } from "@/lib/admin-bootstrap-plan";
+import { GST_STATES, gstStateName } from "@/lib/invoice-rules";
 
 export const loginSchema = z.object({
   email: z.string().email("Enter a valid email"),
@@ -170,6 +171,23 @@ export const orgProfileSchema = z.object({
     "At most 500 characters",
     (v) => v.trim(),
   ),
+  stateCode: z
+    .string()
+    .trim()
+    .refine((v) => v === "" || GST_STATES.some((s) => s.code === v), "Choose a state from the list")
+    .transform((v) => v || null)
+    .optional()
+    .transform((v) => v ?? null),
+}).superRefine((v, ctx) => {
+  // A GSTIN's first two digits are its state; the two must agree.
+  const fromGstin = v.gstin ? String(v.gstin).slice(0, 2) : null;
+  if (fromGstin && v.stateCode && fromGstin !== v.stateCode) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["stateCode"],
+      message: `Your GSTIN is registered in ${gstStateName(fromGstin) ?? `state ${fromGstin}`}`,
+    });
+  }
 });
 
 /** Who pays the convenience fee. The rate itself is admin-set and not here. */

@@ -80,6 +80,9 @@ export interface Organization {
   /** GSTIN, when the organisation is registered. Printed on payout invoices. */
   gstin?: string | null;
   address?: string | null;
+  /** GST state of the registered address, for place of supply on fee invoices. */
+  state?: string | null;
+  stateCode?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -268,14 +271,31 @@ export interface Order {
  * the supplier's details are copied in so later settings changes never alter
  * an issued invoice. Kept 8 years (GST record-keeping).
  */
+export type InvoiceKind =
+  /** The buyer paid the convenience fee: Morbin invoices the buyer, per order. */
+  | "CUSTOMER_FEE"
+  /** The organisation absorbed the fee: Morbin invoices the organisation, per payout. */
+  | "ORG_FEE";
+
 export interface Invoice {
   _id?: ObjectId;
   number: string;
   financialYear: string;
-  kind: "CUSTOMER_FEE";
-  orderId: string;
+  kind: InvoiceKind;
+  /** Set for CUSTOMER_FEE invoices. */
+  orderId?: string | null;
+  /** Set for ORG_FEE invoices. */
+  payoutId?: string | null;
   organizationId: string;
-  recipient: { name: string; email: string };
+  /** For ORG_FEE the organisation, with its GST details as they were at issue. */
+  recipient: {
+    name: string;
+    email: string;
+    gstin?: string | null;
+    address?: string | null;
+    state?: string | null;
+    stateCode?: string | null;
+  };
   placeOfSupply: string;
   sac: string;
   description: string;
@@ -661,6 +681,8 @@ export interface Payout {
   transferredAt: Date | null;
   statementDocId: string | null;
   breakdownDocId: string | null;
+  /** ORG_FEE invoice PDF, when the organisation absorbed fees in this payout. */
+  invoiceDocId?: string | null;
   note: string | null;
   createdBy: string;
   paidBy: string | null;
@@ -772,7 +794,8 @@ export type StoredDocumentKind =
   | "PAYOUT_STATEMENT"
   | "PAYOUT_BREAKDOWN"
   | "TICKET_PDF"
-  | "REFUND_PROOF";
+  | "REFUND_PROOF"
+  | "ORG_FEE_INVOICE";
 
 /**
  * The bank account a payout is transferred to.
