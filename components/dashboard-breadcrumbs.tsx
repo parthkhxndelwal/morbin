@@ -33,6 +33,7 @@ const SEGMENTS: Record<string, string> = {
   team: "Team",
   settings: "Settings",
   organisations: "Organisations",
+  orgs: "Organisations",
   applications: "Applications",
   audit: "Audit log",
 };

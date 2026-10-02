@@ -1,6 +1,7 @@
 import "server-only";
 
-import { createCipheriv, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { audit } from "@/lib/audit";
 import { getDb } from "@/lib/db";
 import type { PayoutAccount } from "@/lib/types";
 
@@ -25,10 +26,9 @@ import type { PayoutAccount } from "@/lib/types";
  *    and retry without encryption.
  * 2. **No decryption on the way out.** `getPayoutAccountView` returns the
  *    account name, IFSC and last four digits only, so the UI and the audit log
- *    can never carry a full account number. No current feature needs the
- *    plaintext; the format above is the whole contract, and a feature that
- *    genuinely must decrypt should add an audited, single-purpose reader here
- *    rather than reaching for the stored string.
+ *    can never carry a full account number. The one reader that decrypts is
+ *    `revealPayoutAccountNumber`: admin-only, for making the bank transfer,
+ *    and every call is written to the audit log.
  */
 
 /** AES-256: 32 bytes, 12-byte IV, 16-byte GCM tag. */
@@ -236,4 +236,59 @@ export async function getPayoutAccountView(
     { projection: { accountName: 1, ifsc: 1, last4: 1, verifiedAt: 1, updatedAt: 1 } },
   );
   return doc ? toView(doc) : null;
+}
+
+/** Open a `v1.<iv>.<tag>.<ciphertext>` string. Throws on tampering (GCM auth). */
+function decryptSecret(sealed: string): string {
+  const [version, iv, tag, ciphertext] = sealed.split(".");
+  if (version !== VERSION || !iv || !tag || !ciphertext) throw new Error("Unrecognised payout account format");
+  const decipher = createDecipheriv("aes-256-gcm", encryptionKey(), Buffer.from(iv, "base64url"));
+  decipher.setAuthTag(Buffer.from(tag, "base64url"));
+  return Buffer.concat([decipher.update(Buffer.from(ciphertext, "base64url")), decipher.final()]).toString("utf8");
+}
+
+/**
+ * The full account number, for a Morbin admin about to make the transfer.
+ * The caller must already have authorised the admin; this records who looked,
+ * and when, before returning anything.
+ */
+export async function revealPayoutAccountNumber(
+  organizationId: string,
+  adminId: string,
+): Promise<string | null> {
+  const db = await getDb();
+  const doc = await db
+    .collection<PayoutAccount>("payoutAccounts")
+    .findOne({ organizationId }, { projection: { accountNumberEnc: 1 } });
+  if (!doc?.accountNumberEnc) return null;
+  await audit({
+    actorId: adminId,
+    actorRole: "ADMIN",
+    action: "payoutAccount.revealed",
+    targetType: "organization",
+    targetId: organizationId,
+    organizationId,
+    meta: {},
+  });
+  return decryptSecret(doc.accountNumberEnc);
+}
+
+/** Mark the account checked (e.g. after a penny-drop), so payouts can go to it. */
+export async function verifyPayoutAccount(organizationId: string, adminId: string): Promise<boolean> {
+  const db = await getDb();
+  const r = await db
+    .collection<PayoutAccount>("payoutAccounts")
+    .updateOne({ organizationId, verifiedAt: null }, { $set: { verifiedAt: new Date() } });
+  if (r.modifiedCount > 0) {
+    await audit({
+      actorId: adminId,
+      actorRole: "ADMIN",
+      action: "payoutAccount.verified",
+      targetType: "organization",
+      targetId: organizationId,
+      organizationId,
+      meta: {},
+    });
+  }
+  return r.modifiedCount > 0;
 }

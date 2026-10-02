@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { AdminError, requireAdmin } from "@/lib/admin";
 import { orgActor } from "@/lib/action-guards";
 import { MAX_DOCUMENT_BYTES } from "@/lib/documents";
+import { isEncryptionNotConfigured, revealPayoutAccountNumber, verifyPayoutAccount } from "@/lib/payout-accounts";
 import {
   acknowledgePayout,
   cancelPayout,
@@ -137,4 +138,26 @@ export async function replaceStatementAction(id: string, formData: FormData): Pr
   const statement = await pdfFrom(formData);
   if (typeof statement === "string") return err(statement, { statement });
   return run(() => replacePayoutStatement({ id, adminId: a, statement }), "Statement replaced");
+}
+
+/** The full account number for making the transfer. Audited on every call. */
+export async function revealAccountNumberAction(organizationId: string): Promise<Result<string>> {
+  const a = await adminId();
+  if (typeof a !== "string") return err(a.error);
+  try {
+    const number = await revealPayoutAccountNumber(organizationId, a);
+    return number ? ok(number) : err("No payout account on file.");
+  } catch (error) {
+    if (isEncryptionNotConfigured(error)) return err(error.message);
+    console.error("[payouts:reveal]", error);
+    return err("The account number couldn't be read. Ask the organisation to re-enter it.");
+  }
+}
+
+export async function verifyAccountAction(organizationId: string): Promise<Result> {
+  const a = await adminId();
+  if (typeof a !== "string") return err(a.error);
+  return run(async () => {
+    if (!(await verifyPayoutAccount(organizationId, a))) throw new TxAbort("Already verified, or no account on file.");
+  }, "Payout account marked verified");
 }

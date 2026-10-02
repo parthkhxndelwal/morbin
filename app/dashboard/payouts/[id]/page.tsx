@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
-import { OwnerPayoutActions, PayoutSummary, PayoutThread } from "@/components/features/payouts/payout-detail";
+import { OwnerPayoutActions } from "@/components/features/payouts/owner-payout-actions";
+import { PayoutSummary, PayoutThread } from "@/components/features/payouts/payout-detail";
 import { BreadcrumbLabel } from "@/components/breadcrumb-labels";
 import { Money } from "@/components/patterns/money";
 import { PageHeader } from "@/components/patterns/page-header";

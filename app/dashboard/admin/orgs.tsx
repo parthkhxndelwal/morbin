@@ -259,7 +259,7 @@ export function AdminOrgs({ initialRows }: { initialRows: Row[] }) {
                     </>
                   ) : (
                     <>
-                      <Link href={`/dashboard/admin/${row.org.id}`} className={btnMini}>
+                      <Link href={`/dashboard/admin/orgs/${row.org.id}`} className={btnMini}>
                         Details
                       </Link>
                       {row.org.status === "SUSPENDED" ? (
