@@ -9,6 +9,7 @@
 import { ensureIndexes } from "@/lib/db";
 import { flushEmailQueue } from "@/lib/email";
 import { expireStaleOrders } from "@/lib/orders";
+import { runRetention } from "@/lib/retention";
 
 interface Job {
   name: string;
@@ -19,6 +20,8 @@ interface Job {
 const JOBS: Job[] = [
   { name: "expire-stale-orders", everyMs: 60_000, run: () => expireStaleOrders() },
   { name: "flush-email-queue", everyMs: 30_000, run: () => flushEmailQueue(50) },
+  // Ticks hourly; the job itself runs once a day (lib/retention-rules.ts).
+  { name: "retention", everyMs: 60 * 60_000, run: () => runRetention({ trigger: "SCHEDULE" }) },
 ];
 
 declare global {

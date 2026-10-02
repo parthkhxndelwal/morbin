@@ -421,6 +421,32 @@ export interface AnonymiseResult {
  * dataset IDs checked. Kept: every amount, status and id, the ledger, payouts
  * and invoices (GST law, 8 years). Reused by the retention job.
  */
+/**
+ * The buyer's personal fields on an order, erased. A pipeline, so orders
+ * without lookup keys (null or absent) are left as they are.
+ */
+function buyerErasure(now: Date) {
+  return [
+    {
+      $set: {
+        buyerName: ERASED_NAME,
+        buyerEmail: ERASED_EMAIL,
+        buyerPhone: "",
+        customFields: { $literal: [] },
+        lookupKeys: {
+          $cond: [
+            { $isArray: "$lookupKeys" },
+            { $map: { input: "$lookupKeys", as: "k", in: { $mergeObjects: ["$$k", { key: "erased" }] } } },
+            "$lookupKeys",
+          ],
+        },
+        ticketPdfDocId: null,
+        piiErasedAt: now,
+      },
+    },
+  ];
+}
+
 export async function anonymisePerson(email: string, opts: { session?: ClientSession } = {}): Promise<AnonymiseResult> {
   const run = async (session: ClientSession, db: Db): Promise<{ result: AnonymiseResult; pdfIds: string[] }> => {
     const match = emailEq(email);
@@ -431,26 +457,7 @@ export async function anonymisePerson(email: string, opts: { session?: ClientSes
     const pdfIds = buyerOrders.map((x) => x.ticketPdfDocId).filter((x): x is string => !!x);
     const asBuyer = await o.updateMany(
       { buyerEmail: match },
-      // A pipeline, so orders without lookup keys (null or absent) are left as they are.
-      [
-        {
-          $set: {
-            buyerName: ERASED_NAME,
-            buyerEmail: ERASED_EMAIL,
-            buyerPhone: "",
-            customFields: { $literal: [] },
-            lookupKeys: {
-              $cond: [
-                { $isArray: "$lookupKeys" },
-                { $map: { input: "$lookupKeys", as: "k", in: { $mergeObjects: ["$$k", { key: "erased" }] } } },
-                "$lookupKeys",
-              ],
-            },
-            ticketPdfDocId: null,
-            piiErasedAt: now,
-          },
-        },
-      ],
+      buyerErasure(now),
       { session },
     );
     const asAttendee = await o.updateMany(
@@ -518,6 +525,93 @@ export async function anonymisePerson(email: string, opts: { session?: ClientSes
 
   const { result, pdfIds } = opts.session ? await run(opts.session, await getDb()) : await withTransaction(run);
   // Files live outside the database; removed once the transaction has committed.
+  for (const id of pdfIds) await deleteDocument(id);
+  return result;
+}
+
+export interface AnonymiseEventResult {
+  orders: number;
+  tickets: number;
+  checkoutSessions: number;
+  emails: number;
+  refundCases: number;
+  documents: number;
+}
+
+/**
+ * Retention: anonymise every buyer and attendee of one event, and mark the
+ * event `piiPurgedAt` in the same transaction so the job never repeats it.
+ * Accounts are untouched (they belong to people, not to this event); invoices,
+ * amounts and the ledger likewise.
+ */
+export async function anonymiseEvent(eventId: string): Promise<AnonymiseEventResult | null> {
+  const eventOid = toObjectId(eventId);
+  if (!eventOid) return null;
+  const { result, pdfIds } = await withTransaction(async (session, db) => {
+    const now = new Date();
+    const claimed = await db
+      .collection("events")
+      .updateOne({ _id: eventOid, piiPurgedAt: null }, { $set: { piiPurgedAt: now } }, { session });
+    if (claimed.modifiedCount === 0) return { result: null, pdfIds: [] as string[] };
+
+    const o = db.collection<Order>("orders");
+    const orders = await o.find({ eventId }, { session, projection: { ticketPdfDocId: 1 } }).toArray();
+    const orderIds = orders.map((x) => x._id!.toString());
+    const pdfIds = orders.map((x) => x.ticketPdfDocId).filter((x): x is string => !!x);
+    const ord = await o.updateMany(
+      { eventId },
+      [
+        ...buyerErasure(now),
+        {
+          $set: {
+            attendees: {
+              $map: {
+                input: { $ifNull: ["$attendees", []] },
+                as: "a",
+                in: { $mergeObjects: ["$$a", { name: ERASED_NAME, email: ERASED_EMAIL }] },
+              },
+            },
+          },
+        },
+      ],
+      { session },
+    );
+    const tickets = await db
+      .collection<Ticket>("tickets")
+      .updateMany({ eventId }, { $set: { attendeeName: ERASED_NAME, attendeeEmail: ERASED_EMAIL, lookupKey: null } }, { session });
+    const sessions = await db.collection<CheckoutSession>("checkoutSessions").updateMany(
+      { eventId },
+      {
+        $set: {
+          "identity.email": null,
+          "identity.userId": null,
+          answers: {},
+          customFields: {},
+          lookups: null,
+          branch: null,
+          updatedAt: now,
+        },
+      },
+      { session },
+    );
+    const emails = await db
+      .collection<EmailRecord>("emailDeliveries")
+      .updateMany({ orderId: { $in: orderIds } }, { $set: { recipient: ERASED_EMAIL, meta: null } }, { session });
+    const refunds = await db
+      .collection<RefundCase>("refundCases")
+      .updateMany({ eventId }, { $set: { customer: { name: ERASED_NAME, email: ERASED_EMAIL }, updatedAt: now } }, { session });
+    return {
+      pdfIds,
+      result: {
+        orders: ord.modifiedCount,
+        tickets: tickets.modifiedCount,
+        checkoutSessions: sessions.modifiedCount,
+        emails: emails.modifiedCount,
+        refundCases: refunds.modifiedCount,
+        documents: pdfIds.length,
+      },
+    };
+  });
   for (const id of pdfIds) await deleteDocument(id);
   return result;
 }

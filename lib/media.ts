@@ -6,7 +6,7 @@
  * are served back by `app/media/[...key]/route.ts`. Only *keys* are persisted in
  * Mongo; the URL is derived at render time.
  */
-import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { publicMediaUrl } from "@/lib/media-public";
 
@@ -107,4 +107,36 @@ export function mediaBucket(): MediaStore {
       }
     },
   };
+}
+
+/**
+ * Every file under `events/`, for the retention sweep: valid keys, plus any
+ * leftover temp files from an interrupted write (`key` null, `file` set).
+ * Anything else in the directory is not ours to judge and is not listed.
+ */
+export async function listMediaFiles(): Promise<{ key: string | null; file: string; modifiedAt: Date }[]> {
+  const base = path.join(/*turbopackIgnore: true*/ mediaRoot(), "events");
+  const out: { key: string | null; file: string; modifiedAt: Date }[] = [];
+  const dirs = await readdir(base, { withFileTypes: true }).catch(() => []);
+  for (const dir of dirs) {
+    if (!dir.isDirectory() || !/^[a-f0-9]{24}$/.test(dir.name)) continue;
+    const files = await readdir(path.join(/*turbopackIgnore: true*/ base, dir.name)).catch(() => [] as string[]);
+    for (const name of files) {
+      const key = `events/${dir.name}/${name}`;
+      const isKey = isValidMediaKey(key);
+      const isTmp = /\.tmp$/.test(name) && isValidMediaKey(key.replace(/\.\d+\.tmp$/, ""));
+      if (!isKey && !isTmp) continue;
+      const file = path.join(/*turbopackIgnore: true*/ base, dir.name, name);
+      const info = await stat(file).catch(() => null);
+      if (info?.isFile()) out.push({ key: isKey ? key : null, file, modifiedAt: info.mtime });
+    }
+  }
+  return out;
+}
+
+/** Remove a leftover temp file found by `listMediaFiles`. */
+export async function removeMediaTemp(file: string): Promise<void> {
+  const full = path.resolve(/*turbopackIgnore: true*/ file);
+  if (!full.startsWith(mediaRoot() + path.sep) || !full.endsWith(".tmp")) throw new Error("Invalid media path");
+  await unlink(full).catch(() => {});
 }
