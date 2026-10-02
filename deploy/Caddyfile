@@ -1,0 +1,37 @@
+{
+	email {$ACME_EMAIL}
+}
+
+{$MORBIN_DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=63072000; includeSubDomains"
+		-Server
+	}
+
+	# Body limit: largest legitimate upload is a 5 MB event banner.
+	request_body {
+		max_size 6MB
+	}
+
+	reverse_proxy app:3000 {
+		health_uri /api/health
+		health_interval 30s
+	}
+
+	log {
+		output stdout
+		# Never log query strings: magic-link tokens travel in them.
+		format filter {
+			wrap json
+			fields {
+				request>uri query {
+					delete
+				}
+				request>headers>Cookie delete
+				request>headers>Authorization delete
+			}
+		}
+	}
+}

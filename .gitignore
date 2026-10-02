@@ -43,3 +43,12 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# graphify
+graphify-out/
+
+!.env.example
+
+# self-hosted runtime data
+/data/
+/backups/

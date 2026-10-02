@@ -1,0 +1,14 @@
+node_modules
+.next
+.open-next
+.wrangler
+.git
+.env*
+!.env.example
+data
+backups
+graphify-out
+dev.log
+*.tsbuildinfo
+.opencode
+-w

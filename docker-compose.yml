@@ -1,0 +1,119 @@
+# Morbin on a single server.
+#
+#   docker compose up -d --build
+#
+# Only Caddy publishes ports. MongoDB and the app are reachable solely on the
+# internal network, and every byte of personal data lives in the named volumes
+# below, on this host. See docs/DEPLOYMENT.md.
+
+name: morbin
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      MORBIN_DOMAIN: ${MORBIN_DOMAIN:?set MORBIN_DOMAIN in .env}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      app:
+        condition: service_healthy
+    networks: [edge]
+
+  app:
+    build:
+      context: .
+      args:
+        NEXT_PUBLIC_APP_URL: https://${MORBIN_DOMAIN}
+        NEXT_PUBLIC_RAZORPAY_KEY_ID: ${NEXT_PUBLIC_RAZORPAY_KEY_ID:-}
+    image: morbin-app:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      MONGODB_URI: mongodb://${MONGO_APP_USER}:${MONGO_APP_PASSWORD}@mongo:27017/${MORBIN_DB:-morbin}?replicaSet=rs0&authSource=${MORBIN_DB:-morbin}
+      NEXT_PUBLIC_APP_URL: https://${MORBIN_DOMAIN}
+      AUTH_URL: https://${MORBIN_DOMAIN}
+      AUTH_TRUST_HOST: "true"
+      MEDIA_DIR: /data/media
+      DOCUMENTS_DIR: /data/documents
+    volumes:
+      - media:/data/media
+      - documents:/data/documents
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /app/.next/cache:uid=1001,gid=1001,mode=0750
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    depends_on:
+      mongo:
+        condition: service_healthy
+    networks: [edge, internal]
+
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    # Single-node replica set: required for multi-document transactions, which
+    # order capture, refunds and settlements rely on.
+    command: ["--replSet", "rs0", "--bind_ip_all", "--keyFile", "/etc/mongo/keyfile"]
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER:?set MONGO_ROOT_USER}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?set MONGO_ROOT_PASSWORD}
+      MORBIN_DB: ${MORBIN_DB:-morbin}
+      MONGO_APP_USER: ${MONGO_APP_USER:?set MONGO_APP_USER}
+      MONGO_APP_PASSWORD: ${MONGO_APP_PASSWORD:?set MONGO_APP_PASSWORD}
+    entrypoint: ["/bin/bash", "/deploy/mongo-entrypoint.sh"]
+    volumes:
+      - mongo_data:/data/db
+      - ./deploy/mongo-entrypoint.sh:/deploy/mongo-entrypoint.sh:ro
+      - ./deploy/mongo-init.js:/docker-entrypoint-initdb.d/10-app-user.js:ro
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "-u", "${MONGO_ROOT_USER}", "-p", "${MONGO_ROOT_PASSWORD}", "--eval", "try { rs.status().ok } catch (e) { rs.initiate({_id:'rs0',members:[{_id:0,host:'mongo:27017'}]}).ok }"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
+    networks: [internal]
+
+  backup:
+    build:
+      context: deploy
+      dockerfile: backup.Dockerfile
+    image: morbin-backup:latest
+    restart: unless-stopped
+    environment:
+      MONGO_ROOT_USER: ${MONGO_ROOT_USER}
+      MONGO_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      BACKUP_PASSPHRASE: ${BACKUP_PASSPHRASE:?set BACKUP_PASSPHRASE}
+    entrypoint: ["/bin/bash", "/deploy/backup.sh"]
+    volumes:
+      - ./deploy/backup.sh:/deploy/backup.sh:ro
+      - media:/data/media:ro
+      - documents:/data/documents:ro
+      - ${BACKUP_DIR:-./backups}:/backups
+    depends_on:
+      mongo:
+        condition: service_healthy
+    networks: [internal]
+
+networks:
+  edge:
+  internal:
+    internal: true
+
+volumes:
+  mongo_data:
+  media:
+  documents:
+  caddy_data:
+  caddy_config:
