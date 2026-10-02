@@ -55,6 +55,7 @@ export default function PrivacyPage() {
       <LegalFooter
         links={[
           { href: "/", label: "Home" },
+          { href: "/apply", label: "List your event" },
           { href: "/legal/terms", label: "Terms & Conditions" },
         ]}
       />

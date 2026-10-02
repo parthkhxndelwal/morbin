@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { AdminError, requireAdmin } from "@/lib/admin";
 import { orgActor } from "@/lib/action-guards";
 import { MAX_DOCUMENT_BYTES } from "@/lib/documents";
+import { issueOrgFeeInvoice } from "@/lib/invoices";
 import { isEncryptionNotConfigured, revealPayoutAccountNumber, verifyPayoutAccount } from "@/lib/payout-accounts";
 import {
   acknowledgePayout,
@@ -112,6 +113,16 @@ export async function markPayoutPaidAction(id: string, formData: FormData): Prom
     },
     "Payout marked paid — the organisation has been notified",
   );
+}
+
+/** Retry the ORG_FEE invoice for a paid payout (e.g. after GST settings were completed). */
+export async function issueFeeInvoiceAction(id: string): Promise<Result> {
+  const a = await adminId();
+  if (typeof a !== "string") return err(a.error);
+  return run(async () => {
+    const invoice = await issueOrgFeeInvoice(id);
+    if (!invoice) throw new TxAbort("No invoice is due, or Morbin's GST details in Admin → Settings are incomplete.");
+  }, "Fee invoice issued");
 }
 
 export async function replyToQueryAction(id: string, formData: FormData): Promise<Result> {

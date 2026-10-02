@@ -398,6 +398,20 @@ export async function flushEmailQueue(limit = 20): Promise<{ sent: number; faile
           arn: meta.refundArn ? esc(meta.refundArn) : null,
           speed: meta.refundSpeed ?? "NORMAL",
         });
+      } else if (job.kind === "REFUND_MESSAGE") {
+        // Free text from a Morbin admin: escaped, line breaks kept.
+        subject = `About your refund — ${meta.eventTitle ?? "your event"}`;
+        html = `<div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#111">
+          <h2 style="margin:0 0 16px">About your refund</h2>
+          <p>Hi ${attendeeName},</p>
+          <p>This is Morbin, the ticketing platform for ${eventTitle}, about your refund of
+             <strong>${rupees(meta.refundAmountPaise ?? 0)}</strong>.</p>
+          <blockquote style="margin:16px 0;padding:12px 16px;border-left:3px solid #7c3aed;background:#f6f3ff">${esc(meta.message ?? "").replace(/\n/g, "<br>")}</blockquote>
+          <p>Just reply to this email to answer.</p>
+          <p style="color:#555;font-size:13px;border-top:1px solid #eee;padding-top:12px">
+            For your safety: Morbin will never ask for an OTP, PIN, card number, CVV or password. If anyone asks
+            for these — even in a reply to this email — don't share them.</p>
+        </div>`;
       } else if (job.kind === "APPLICATION") {
         const org = esc(meta.organizationName ?? "your organisation");
         const note = meta.message ? `<blockquote style="margin:16px 0;padding:12px 16px;border-left:3px solid #7c3aed;background:#f6f3ff">${esc(meta.message).replace(/\n/g, "<br>")}</blockquote>` : "";
@@ -491,7 +505,10 @@ export async function flushEmailQueue(limit = 20): Promise<{ sent: number; faile
         subject,
         html,
         attachments,
-        replyTo: job.kind === "APPLICATION" || job.kind === "DATA_REQUEST_RESULT" ? (process.env.SUPPORT_EMAIL ?? null) : null,
+        replyTo:
+          job.kind === "APPLICATION" || job.kind === "REFUND_MESSAGE" || job.kind === "DATA_REQUEST_RESULT"
+            ? (process.env.SUPPORT_EMAIL ?? null)
+            : null,
       });
       if (!r.ok) throw new Error("send failed");
       await db.collection("emailDeliveries").updateOne(

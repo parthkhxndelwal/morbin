@@ -15,7 +15,9 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
+import { GST_STATES } from "@/lib/invoice-rules";
 import { ActionForm } from "@/components/patterns/action-form";
 import { updateOrgProfileAction } from "./actions";
 
@@ -30,6 +32,7 @@ export function OrgProfileForm({
     contactPhone: string;
     gstin: string;
     address: string;
+    stateCode: string;
   };
   disabled?: boolean;
 }) {
@@ -125,6 +128,28 @@ export function OrgProfileForm({
                   Optional. Used on invoices and on the transfer advice.
                 </FieldDescription>
                 <FieldError>{errors.address}</FieldError>
+              </Field>
+              <Field data-invalid={!!errors.stateCode || undefined}>
+                <FieldLabel htmlFor="org-state">State</FieldLabel>
+                <NativeSelect
+                  id="org-state"
+                  name="stateCode"
+                  defaultValue={defaults.stateCode}
+                  className="w-full"
+                  aria-invalid={!!errors.stateCode || undefined}
+                >
+                  <NativeSelectOption value="">Not set</NativeSelectOption>
+                  {GST_STATES.map((s) => (
+                    <NativeSelectOption key={s.code} value={s.code}>
+                      {s.name} ({s.code})
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+                <FieldDescription>
+                  Decides whether Morbin&apos;s fee invoice charges CGST + SGST
+                  or IGST. With a GSTIN, it must match the GSTIN&apos;s state.
+                </FieldDescription>
+                <FieldError>{errors.stateCode}</FieldError>
               </Field>
             </FieldGroup>
           )}
