@@ -316,6 +316,7 @@ export const platformSettingsSchema = z.object({
     .regex(/^\d{1,2}(\.\d{1,2})?$/, "Enter a rate like 18")
     .transform((v) => Math.round(Number(v) * 100)),
   splitRule: z.enum(["SUPPLIER_STATE", "ALWAYS_IGST"]),
-  invoicePrefix: z.string().trim().toUpperCase().regex(/^[A-Z0-9-]{1,10}$/, "Up to 10 letters, digits or dashes"),
+  // GST invoice numbers are at most 16 characters: PREFIX/26-27/NNNN…
+  invoicePrefix: z.string().trim().toUpperCase().regex(/^[A-Z0-9]{1,3}$/, "Up to 3 letters or digits"),
   footerText: z.string().trim().max(300),
 });

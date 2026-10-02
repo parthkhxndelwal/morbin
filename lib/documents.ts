@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { ObjectId } from "mongodb";
 import { getDb, toObjectId } from "@/lib/db";
@@ -96,6 +96,18 @@ export async function readDocumentBody(doc: StoredDocument): Promise<Buffer> {
     throw new Error("Document integrity check failed");
   }
   return body;
+}
+
+/** Remove a document and its file (retention jobs, test cleanup). */
+export async function deleteDocument(id: string): Promise<void> {
+  const doc = await getDocument(id);
+  if (!doc) return;
+  const full = path.resolve(/*turbopackIgnore: true*/ root(), doc.storageKey);
+  if (full.startsWith(root() + path.sep)) {
+    await unlink(full).catch(() => {});
+  }
+  const db = await getDb();
+  await db.collection<StoredDocument>("documents").deleteOne({ _id: doc._id });
 }
 
 /** Quote a value for CSV, neutralising spreadsheet formula injection. */

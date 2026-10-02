@@ -1,8 +1,9 @@
 "use client";
 
-import { AlertTriangleIcon } from "lucide-react";
+import { AlertTriangleIcon, FileTextIcon } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
@@ -85,6 +86,12 @@ export function PlatformSettingsForm({ values, gstReady }: { values: Values; gst
               <CardDescription>
                 Printed on the tax invoice for the convenience fee. Changes apply to invoices issued from now on.
               </CardDescription>
+              <CardAction>
+                <Button variant="outline" size="sm" nativeButton={false} render={<a href="/api/admin/invoice-preview" target="_blank" rel="noreferrer" />}>
+                  <FileTextIcon data-icon="inline-start" />
+                  Preview invoice
+                </Button>
+              </CardAction>
             </CardHeader>
             <CardContent>
               <FieldGroup className="grid gap-4 sm:grid-cols-2">
@@ -114,7 +121,7 @@ export function PlatformSettingsForm({ values, gstReady }: { values: Values; gst
                   label="Invoice number prefix"
                   defaultValue={g.invoicePrefix}
                   error={errors.invoicePrefix}
-                  hint="Numbers run per financial year, e.g. MRB/2026-27/000001"
+                  hint="Up to 3 characters. Numbers run per financial year, e.g. MRB/26-27/000001 — GST allows 16 characters at most."
                 />
                 <Field data-invalid={!!errors.footerText || undefined} className="sm:col-span-2">
                   <FieldLabel htmlFor="ps-footer">Footer text</FieldLabel>

@@ -10,7 +10,10 @@
 import assert from "node:assert/strict";
 import { ObjectId } from "mongodb";
 import { getClientPromise, getDb, getDbName } from "@/lib/db";
+import { deleteDocument } from "@/lib/documents";
 import { getOrgBalance } from "@/lib/ledger";
+import { getPlatformSettings, gstReady } from "@/lib/platform-settings";
+import { getOrderTicketPdf } from "@/lib/ticket-documents";
 import { capturePaidOrder, createHeldOrder, expireStaleOrders, releaseOrder } from "@/lib/orders";
 import { cancelPayout, issuePayout } from "@/lib/payouts";
 import { computePricing } from "@/lib/pricing";
@@ -21,7 +24,7 @@ import {
   requestRefund,
 } from "@/lib/refunds";
 import { TxAbort } from "@/lib/tx";
-import type { Event, LedgerEntry, Order, RefundCase, Ticket, TicketType } from "@/lib/types";
+import type { EmailRecord, Event, Invoice, LedgerEntry, Order, RefundCase, Ticket, TicketType } from "@/lib/types";
 
 if (!/test|dev/i.test(getDbName())) {
   console.error(`Refusing to run against "${getDbName()}"`);
@@ -181,6 +184,34 @@ try {
     assert.equal(await db.collection("ledgerEntries").countDocuments({ organizationId: orgId }), 1);
   });
 
+  await step("one ticket email per order; PDF and fee invoice built once and reused", async () => {
+    const orderId = paid._id!.toString();
+    const emails = await db.collection<EmailRecord>("emailDeliveries").find({ orderId, kind: "TICKET_PDF" }).toArray();
+    assert.equal(emails.length, 1);
+    assert.equal(emails[0].recipient, paid.buyerEmail);
+
+    const first = await getOrderTicketPdf(orderId);
+    assert.ok(first && first.body.subarray(0, 5).toString() === "%PDF-");
+    const docId = (await db.collection<Order>("orders").findOne({ _id: paid._id }))!.ticketPdfDocId;
+    assert.ok(docId);
+    const second = await getOrderTicketPdf(orderId);
+    assert.ok(second!.body.equals(first!.body), "the stored PDF is reused, not rebuilt");
+    assert.equal((await db.collection<Order>("orders").findOne({ _id: paid._id }))!.ticketPdfDocId, docId);
+
+    const invoices = await db.collection<Invoice>("invoices").find({ orderId }).toArray();
+    if (gstReady((await getPlatformSettings()).gst)) {
+      assert.equal(invoices.length, 1);
+      const inv = invoices[0];
+      assert.match(inv.number, /^[A-Z0-9]{1,3}\/\d{2}-\d{2}\/\d+$/);
+      assert.ok(inv.number.length <= 16);
+      assert.equal(inv.totalPaise, paid.pricing!.feePaise);
+      assert.equal(inv.cgstPaise + inv.sgstPaise + inv.igstPaise, paid.pricing!.feeGstPaise);
+      assert.equal(inv.taxablePaise + paid.pricing!.feeGstPaise, paid.pricing!.feePaise);
+    } else {
+      assert.equal(invoices.length, 0, "no invoice while Morbin's GST details are incomplete");
+    }
+  });
+
   const ticketIds = (await db.collection<Ticket>("tickets").find({ orderId: paid._id!.toString() }).toArray()).map(
     (t) => t._id!.toString(),
   );
@@ -321,6 +352,8 @@ try {
     db.collection("auditLogs").deleteMany({ organizationId: orgId }),
     db.collection("notifications").deleteMany({ $or: [{ organizationId: orgId }, { kind: /REFUND/, organizationId: null, createdAt: { $gte: now } }] }),
     db.collection("emailDeliveries").deleteMany({ orderId: { $in: orderIds } }),
+    db.collection("invoices").deleteMany({ orderId: { $in: orderIds } }),
+    ...(await db.collection("documents").find({ organizationId: orgId }).toArray()).map((d) => deleteDocument(d._id.toString())),
     db.collection("locks").deleteOne({ _id: `balance:${orgId}` as never }),
   ]);
   await (await getClientPromise()).close();

@@ -138,6 +138,12 @@ export async function ensureIndexes(): Promise<void> {
     db.collection("accountSetupTokens").createIndex({ userId: 1 }, { unique: true }),
     db.collection("feeChanges").createIndex({ organizationId: 1, at: -1 }),
     db.collection("rateLimits").createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
+    db.collection("invoices").createIndex({ number: 1 }, { unique: true }),
+    db.collection("invoices").createIndex({ orderId: 1, kind: 1 }, { unique: true }),
+    db.collection("emailDeliveries").createIndex(
+      { kind: 1, orderId: 1 },
+      { unique: true, partialFilterExpression: { kind: "TICKET_PDF" } },
+    ),
     db.collection("applications").createIndex({ status: 1, createdAt: -1 }),
     db.collection("applications").createIndex(
       { email: 1 },

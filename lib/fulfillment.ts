@@ -1,6 +1,6 @@
 import type { ClientSession, Db } from "mongodb";
 import { getDb } from "@/lib/db";
-import { makeTicketCode, signTicket, ticketQrSvg } from "@/lib/tickets";
+import { makeTicketCode, signTicket } from "@/lib/tickets";
 import type { EmailRecord, Event, Order, Ticket } from "@/lib/types";
 
 /**
@@ -64,32 +64,34 @@ export async function insertTicketsOnce(
  * committed, so an email is never sent for a payment that rolled back. Keyed by
  * ticket id, so a retried capture can't queue duplicates.
  */
+/**
+ * Queue the ticket email for a paid order: one email to the buyer with every
+ * ticket (and the fee invoice, when one is due) in a single PDF. The PDF is
+ * built when the email is sent, so payment capture never waits on it or fails
+ * because of it. Idempotent per order.
+ */
 export async function queueTicketEmails(order: Order, event: Event | null, tickets: Ticket[]): Promise<void> {
   if (tickets.length === 0) return;
   const db = await getDb();
-  const qrCache = new Map<string, string | null>();
-  for (const t of tickets) {
-    if (!qrCache.has(t.qrPayload)) qrCache.set(t.qrPayload, await ticketQrSvg(t.qrPayload));
-    const ticketId = t._id?.toString() ?? null;
-    const doc: EmailRecord = {
-      orderId: order._id!.toString(),
-      ticketId,
-      recipient: t.attendeeEmail,
-      kind: "TICKET",
-      status: "QUEUED",
-      attempts: 0,
-      lastError: null,
-      meta: {
-        eventTitle: event?.title ?? "Your event",
-        eventVenue: event?.venue ?? "",
-        eventStartsAt: event?.startsAt?.toISOString() ?? "",
-        attendeeName: t.attendeeName,
-        ticketCode: t.code,
-        qrSvg: qrCache.get(t.qrPayload) ?? null,
-      },
-    };
-    await db
-      .collection<EmailRecord>("emailDeliveries")
-      .updateOne({ kind: "TICKET", ticketId }, { $setOnInsert: doc }, { upsert: true });
-  }
+  const orderId = order._id!.toString();
+  const doc: EmailRecord = {
+    orderId,
+    ticketId: null,
+    recipient: order.buyerEmail,
+    kind: "TICKET_PDF",
+    status: "QUEUED",
+    attempts: 0,
+    lastError: null,
+    meta: {
+      eventTitle: event?.title ?? "Your event",
+      eventVenue: event?.venue ?? "",
+      eventStartsAt: event?.startsAt?.toISOString() ?? "",
+      attendeeName: order.buyerName,
+      ticketCode: String(tickets.length),
+      link: event?.slug ? `/event/${event.slug}/tickets` : null,
+    },
+  };
+  await db
+    .collection<EmailRecord>("emailDeliveries")
+    .updateOne({ kind: "TICKET_PDF", orderId }, { $setOnInsert: doc }, { upsert: true });
 }

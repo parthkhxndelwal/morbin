@@ -255,8 +255,38 @@ export interface Order {
   gateway?: { feePaise: number; taxPaise: number; method: string | null } | null;
   /** Ticket value refunded so far (never includes the convenience fee). */
   refundedPaise?: number;
+  /** The tax invoice for the convenience fee, when the buyer paid one. */
+  invoiceId?: string | null;
+  /** The ticket PDF (tickets + invoice page) in the document store. */
+  ticketPdfDocId?: string | null;
   createdAt: Date;
   paidAt?: Date | null;
+}
+
+/**
+ * A GST tax invoice Morbin issued. Numbers are gapless per financial year, and
+ * the supplier's details are copied in so later settings changes never alter
+ * an issued invoice. Kept 8 years (GST record-keeping).
+ */
+export interface Invoice {
+  _id?: ObjectId;
+  number: string;
+  financialYear: string;
+  kind: "CUSTOMER_FEE";
+  orderId: string;
+  organizationId: string;
+  recipient: { name: string; email: string };
+  placeOfSupply: string;
+  sac: string;
+  description: string;
+  taxablePaise: number;
+  cgstPaise: number;
+  sgstPaise: number;
+  igstPaise: number;
+  totalPaise: number;
+  rateBps: number;
+  supplier: GstSettings;
+  issuedAt: Date;
 }
 
 export interface OrderCustomField {
@@ -301,7 +331,10 @@ export interface WebhookRecord {
 }
 
 export type EmailKind =
+  /** Legacy: one email per ticket with an inline QR. */
   | "TICKET"
+  /** One email per order with the ticket PDF (tickets + tax invoice) attached. */
+  | "TICKET_PDF"
   | "REFUND"
   | "EVENT_UPDATE"
   | "FLOW_MAGIC_LINK"

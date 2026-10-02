@@ -1,4 +1,5 @@
 import { SESv2Client, SendEmailCommand } from "@aws-sdk/client-sesv2";
+import { formatDateTime } from "@/lib/format";
 
 function sesClient(): SESv2Client | null {
   const region = process.env.AWS_REGION ?? "";
@@ -15,36 +16,105 @@ function fromAddress(): string {
   return process.env.EMAIL_FROM ?? "Morbin <no-reply@morbin.space>";
 }
 
+export interface EmailAttachment {
+  fileName: string;
+  contentType: string;
+  body: Buffer;
+}
+
+/** RFC 2047 encoded-word, so non-ASCII subjects survive every mail client. */
+function encodeHeader(value: string): string {
+  return /^[ -~]*$/.test(value) ? value : `=?UTF-8?B?${Buffer.from(value, "utf8").toString("base64")}?=`;
+}
+
+/** Base64 wrapped at 76 characters, as MIME requires. */
+function base64Lines(buf: Buffer): string {
+  return buf.toString("base64").replace(/.{1,76}/g, "$&\r\n");
+}
+
+/**
+ * A multipart/mixed message: the HTML body plus attachments. SES's simple
+ * content can't carry files, so emails with attachments go out as raw MIME.
+ * Header values are ours or validated addresses; CR/LF is stripped regardless
+ * so nothing can inject a header.
+ */
+function buildMime(input: { from: string; to: string; replyTo?: string | null; subject: string; html: string; attachments: EmailAttachment[] }): Buffer {
+  const clean = (v: string) => v.replace(/[\r\n]+/g, " ");
+  const boundary = `morbin-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  const lines = [
+    `From: ${clean(input.from)}`,
+    `To: ${clean(input.to)}`,
+    ...(input.replyTo ? [`Reply-To: ${clean(input.replyTo)}`] : []),
+    `Subject: ${encodeHeader(clean(input.subject))}`,
+    "MIME-Version: 1.0",
+    `Content-Type: multipart/mixed; boundary="${boundary}"`,
+    "",
+    `--${boundary}`,
+    'Content-Type: text/html; charset="UTF-8"',
+    "Content-Transfer-Encoding: base64",
+    "",
+    base64Lines(Buffer.from(input.html, "utf8")),
+  ];
+  for (const a of input.attachments) {
+    const name = clean(a.fileName).replace(/"/g, "");
+    lines.push(
+      `--${boundary}`,
+      `Content-Type: ${a.contentType}; name="${name}"`,
+      `Content-Disposition: attachment; filename="${name}"`,
+      "Content-Transfer-Encoding: base64",
+      "",
+      base64Lines(a.body),
+    );
+  }
+  lines.push(`--${boundary}--`, "");
+  return Buffer.from(lines.join("\r\n"), "utf8");
+}
+
 export async function sendEmail({
   to,
   subject,
   html,
   replyTo,
+  attachments = [],
 }: {
   to: string;
   subject: string;
   html: string;
   /** Where a reply should go when the From address isn't read by a person. */
   replyTo?: string | null;
+  attachments?: EmailAttachment[];
 }): Promise<{ ok: boolean; id?: string; dev?: boolean }> {
   const client = sesClient();
   if (!client) {
-    console.info("[email:dev] AWS SES not configured; skipping send", { to, subject });
+    console.info("[email:dev] AWS SES not configured; skipping send", {
+      to,
+      subject,
+      attachments: attachments.map((a) => `${a.fileName} (${a.body.length} bytes)`),
+    });
     return { ok: true, dev: true };
   }
   try {
     const out = await client.send(
-      new SendEmailCommand({
-        FromEmailAddress: fromAddress(),
-        Destination: { ToAddresses: [to] },
-        ...(replyTo ? { ReplyToAddresses: [replyTo] } : {}),
-        Content: {
-          Simple: {
-            Subject: { Data: subject, Charset: "UTF-8" },
-            Body: { Html: { Data: html, Charset: "UTF-8" } },
-          },
-        },
-      }),
+      new SendEmailCommand(
+        attachments.length
+          ? {
+              Destination: { ToAddresses: [to] },
+              Content: {
+                Raw: { Data: buildMime({ from: fromAddress(), to, replyTo, subject, html, attachments }) },
+              },
+            }
+          : {
+              FromEmailAddress: fromAddress(),
+              Destination: { ToAddresses: [to] },
+              ...(replyTo ? { ReplyToAddresses: [replyTo] } : {}),
+              Content: {
+                Simple: {
+                  Subject: { Data: subject, Charset: "UTF-8" },
+                  Body: { Html: { Data: html, Charset: "UTF-8" } },
+                },
+              },
+            },
+      ),
     );
     return { ok: true, id: out.MessageId };
   } catch (error) {
@@ -206,6 +276,26 @@ function teamHtml(m: {
   </div>`;
 }
 
+function ticketPdfHtml(m: {
+  attendeeName: string;
+  eventTitle: string;
+  venue: string;
+  startsAt: string;
+  count: number;
+  link: string | null;
+}): string {
+  const when = m.startsAt ? esc(formatDateTime(m.startsAt)) : "";
+  return `<div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#111">
+    <h2 style="margin:0 0 4px">You're going to ${m.eventTitle}</h2>
+    <p style="margin:0 0 16px;color:#555">${[when, m.venue].filter(Boolean).join(" · ")}</p>
+    <p>Hi ${m.attendeeName},</p>
+    <p>Your ${m.count === 1 ? "ticket is" : `${m.count} tickets are`} attached as a PDF. Show the QR code on each ticket at
+       the entrance — on your phone or printed. If you paid a convenience fee, its tax invoice is the last page.</p>
+    ${m.link ? emailButton(m.link, "View my tickets") : ""}
+    <p style="color:#777;font-size:12px">Each QR code is admitted once. Don't share it publicly.</p>
+  </div>`;
+}
+
 /** Attempts before a delivery is given up as FAILED (≈ 1 + 2 + 4 + 8 + 16 min). */
 const MAX_ATTEMPTS = 6;
 /** A claim older than this is assumed abandoned (process crashed mid-send). */
@@ -246,7 +336,23 @@ export async function flushEmailQueue(limit = 20): Promise<{ sent: number; faile
       const attendeeName = esc(meta.attendeeName ?? "there");
       let subject: string;
       let html: string;
-      if (job.kind === "TICKET") {
+      let attachments: EmailAttachment[] = [];
+      if (job.kind === "TICKET_PDF") {
+        const { getOrderTicketPdf } = await import("@/lib/ticket-documents");
+        const pdf = job.orderId ? await getOrderTicketPdf(job.orderId) : null;
+        if (!pdf) throw new Error("ticket PDF not ready");
+        attachments = [{ fileName: pdf.fileName, contentType: "application/pdf", body: pdf.body }];
+        const count = Number(meta.ticketCode ?? "1") || 1;
+        subject = `Your ${count === 1 ? "ticket" : `${count} tickets`} — ${meta.eventTitle ?? "Morbin event"}`;
+        html = ticketPdfHtml({
+          attendeeName,
+          eventTitle,
+          venue: esc(meta.eventVenue ?? ""),
+          startsAt: meta.eventStartsAt ?? "",
+          count,
+          link: meta.link ? esc(appUrl(meta.link)) : null,
+        });
+      } else if (job.kind === "TICKET") {
         subject = `Your ticket — ${meta.eventTitle ?? "Morbin event"}`;
         html = ticketHtml({
           attendeeName,
@@ -340,6 +446,7 @@ export async function flushEmailQueue(limit = 20): Promise<{ sent: number; faile
         to: job.recipient,
         subject,
         html,
+        attachments,
         replyTo: job.kind === "APPLICATION" ? (process.env.SUPPORT_EMAIL ?? null) : null,
       });
       if (!r.ok) throw new Error("send failed");
