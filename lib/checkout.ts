@@ -196,6 +196,21 @@ export async function setContactEmail(publicId: string, email: string): Promise<
   );
 }
 
+/**
+ * DPDP consent: the buyer ticked the checkout notice. Recorded once, against
+ * the notice version they were shown; personal data is refused until then.
+ */
+export async function recordConsent(publicId: string, noticeVersion: string): Promise<void> {
+  const db = await getDb();
+  const now = new Date();
+  await db
+    .collection<CheckoutSession>("checkoutSessions")
+    .updateOne({ publicId, consentAt: { $in: [null, undefined] } }, { $set: { consentAt: now, noticeVersion, updatedAt: now } });
+}
+
+/** The 428 every personal-data endpoint returns before consent. */
+export const CONSENT_REQUIRED = { error: "Please read and accept the privacy notice to continue.", needsConsent: true } as const;
+
 export async function saveCustomFields(
   publicId: string,
   fields: Record<string, string>,

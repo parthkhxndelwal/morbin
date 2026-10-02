@@ -5,6 +5,7 @@ import {
   CHECKOUT_COOKIE,
   RESUME_TTL_MS,
   answerLookup,
+  CONSENT_REQUIRED,
   answerStep,
   branchClaimedUnitsFor,
   claimedUnitsFor,
@@ -12,6 +13,7 @@ import {
   flowForSession,
   getCheckoutSession,
   getSessionByResumeToken,
+  recordConsent,
   saveCustomFields,
   setContactEmail,
   saveQuantity,
@@ -28,6 +30,7 @@ import { clientIp, rateLimit } from "@/lib/rate-limit";
 import { maskEmail } from "@/lib/template-rules";
 import { getPlatformSettings, pricingPolicyFor } from "@/lib/platform-settings";
 import { computePricing } from "@/lib/pricing";
+import { NOTICE_VERSION, checkoutNotice } from "@/lib/privacy-notice";
 import type { CheckoutFlow, Event, FlowOption, FlowStep, Organization, TicketType } from "@/lib/types";
 
 /**
@@ -126,7 +129,10 @@ async function describe(session: NonNullable<Awaited<ReturnType<typeof getChecko
   const [org, settings] = await Promise.all([
     db
       .collection<Organization>("organizations")
-      .findOne({ _id: toObjectId(event.organizationId) as never }, { projection: { feeBps: 1, feeBearer: 1 } }),
+      .findOne(
+        { _id: toObjectId(event.organizationId) as never },
+        { projection: { name: 1, feeBps: 1, feeBearer: 1, retentionMonths: 1 } },
+      ),
     getPlatformSettings(),
   ]);
   const policy = pricingPolicyFor(org ?? {}, event, settings);
@@ -190,6 +196,15 @@ async function describe(session: NonNullable<Awaited<ReturnType<typeof getChecko
       accentColor: branding.accentColor,
       ctaLabel: branding.ctaLabel,
       customFields: branding.customFields,
+    },
+    /** DPDP notice, accepted (unticked by default) before any personal data is sent. */
+    privacy: {
+      consented: !!session.consentAt,
+      noticeVersion: NOTICE_VERSION,
+      notice: checkoutNotice({
+        organizerName: org?.name ?? "",
+        retentionMonths: org?.retentionMonths ?? settings.defaultRetentionMonths,
+      }),
     },
     /** A builder test run: the drawer stops at "This is where the buyer would pay". */
     testRun: !!session.test,
@@ -278,7 +293,21 @@ export async function PATCH(request: Request) {
     email?: string;
     customFields?: Record<string, string>;
     quantity?: Record<string, number>;
+    noticeVersion?: string;
   };
+
+  if (body.action === "consent") {
+    // Only the version the server would show counts: a stale page re-reads first.
+    if (body.noticeVersion !== NOTICE_VERSION) {
+      return NextResponse.json({ error: "The privacy notice was updated. Please review it again." }, { status: 409 });
+    }
+    await recordConsent(session.publicId, NOTICE_VERSION);
+    return NextResponse.json(await describe((await getCheckoutSession(session.publicId))!));
+  }
+
+  // Every other action but a seat count carries personal data (answers, IDs,
+  // email, details), so none of it is accepted before consent.
+  if (!session.consentAt && body.action !== "quantity") return NextResponse.json(CONSENT_REQUIRED, { status: 428 });
 
   if (body.action === "answer") {
     if (!body.stepId || typeof body.value !== "string") {

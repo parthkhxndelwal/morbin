@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { auth, signIn, signOut } from "@/lib/auth";
 import {
   CHECKOUT_COOKIE,
+  CONSENT_REQUIRED,
   RESUME_TTL_MS,
   getSessionByResumeToken,
   setResumeToken,
@@ -22,6 +23,7 @@ export async function GET() {
   if (!session) {
     return NextResponse.json({ error: "No checkout in progress" }, { status: 404 });
   }
+  if (!session.consentAt) return NextResponse.json(CONSENT_REQUIRED, { status: 428 });
 
   const authSession = await auth();
   if (!authSession?.user?.id || !authSession.user.email) {

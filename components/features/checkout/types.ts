@@ -71,6 +71,12 @@ export interface CheckoutState {
   };
   pricing: CheckoutPricing;
   branding: { accentColor: string; ctaLabel: string; customFields: CheckoutCustomField[] };
+  /** DPDP notice; nothing personal is accepted by the server until consented. */
+  privacy: {
+    consented: boolean;
+    noticeVersion: string;
+    notice: { heading: string; body: string }[];
+  };
   /** A builder test run: stop at the payment step. */
   testRun?: boolean;
 }

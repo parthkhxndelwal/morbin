@@ -3,6 +3,7 @@
 import { CheckCircle2Icon } from "lucide-react";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { DetailsFields, TicketPicker } from "@/components/features/checkout/ticket-picker";
+import { ConsentNotice } from "@/components/features/checkout/consent-notice";
 import { DoneStep } from "@/components/features/checkout/done-step";
 import { IdentityStep } from "@/components/features/checkout/identity-step";
 import { PaymentStep } from "@/components/features/checkout/payment-step";
@@ -224,6 +225,18 @@ export function BuyDrawer({
       return null;
     }
     return data as CheckoutState;
+  }
+
+  async function consent() {
+    if (!state) return;
+    setError("");
+    const s = await patch({ action: "consent", noticeVersion: state.privacy.noticeVersion });
+    if (s) apply(s);
+    else {
+      // A 409 means the notice changed under us: show the current one.
+      const fresh = await read().catch(() => null);
+      if (fresh) apply(fresh);
+    }
   }
 
   async function answer(stepId: string, value: string) {
@@ -478,6 +491,7 @@ export function BuyDrawer({
   const label = ctaLabel || "Book now";
   const stages = stagesFor(state);
   const current = stages.findIndex((s) => s.id === screen);
+  const needsConsent = !!state && !state.privacy.consented && screen !== "loading" && screen !== "done";
   const branchLabel =
     state?.branch &&
     state.flow.steps.find((s) => s.id === state.branch!.stepId)?.options?.find((o) => o.value === state.branch!.value)?.label;
@@ -547,75 +561,81 @@ export function BuyDrawer({
               </div>
             )}
 
-            {screen === "questions" && state && <QuestionStep state={state} onAnswer={answer} />}
+            {needsConsent && state && <ConsentNotice privacy={state.privacy} onAccept={consent} />}
 
-            {screen === "identity" && state && (
-              <IdentityStep
-                state={state}
-                googleBusy={googleBusy}
-                sentTo={sentTo}
-                resendIn={resendIn}
-                onGoogle={openGoogle}
-                onSend={sendCode}
-                onCode={verifyCode}
-              />
-            )}
+            {/* Until consent, the step is visible but nothing in it can be submitted. */}
+            <fieldset disabled={needsConsent} className="min-w-0 space-y-5 disabled:opacity-50">
+              {screen === "questions" && state && <QuestionStep state={state} onAnswer={answer} />}
 
-            {screen === "checkout" && state && (
-              <>
-                {(branchLabel || state.identity.verified) && (
-                  <div className="flex items-center justify-between gap-3 rounded-xl bg-muted/60 px-3 py-2 text-sm">
-                    <p className="flex min-w-0 items-center gap-2">
-                      <CheckCircle2Icon className="size-4 shrink-0 text-primary" style={{ color: accentColor }} />
-                      <span className="truncate">
-                        {[branchLabel, state.identity.verified ? state.identity.email : null].filter(Boolean).join(" · ")}
-                      </span>
-                    </p>
-                    <button type="button" onClick={() => void restart()} className="shrink-0 text-xs underline underline-offset-4">
-                      Change
-                    </button>
-                  </div>
-                )}
-                <TicketPicker state={state} qty={qty} onQty={(id, n) => void changeQty(id, n)} />
-                {state.identity.method === "NONE" && !state.identity.verified && (
-                  <Field>
-                    <FieldLabel htmlFor="checkout-contact">Email for your tickets</FieldLabel>
-                    <Input
-                      id="checkout-contact"
-                      type="email"
-                      autoComplete="email"
-                      inputMode="email"
-                      value={contact}
-                      onChange={(e) => setContact(e.target.value)}
-                      placeholder="you@example.com"
-                      className="h-11"
-                      required
-                    />
-                    <FieldDescription>Your tickets are shown here and emailed to this address.</FieldDescription>
-                  </Field>
-                )}
-                {state.branding.customFields.length > 0 && (
-                  <>
-                    <Separator />
-                    <DetailsFields
-                      fields={state.branding.customFields}
-                      values={fields}
-                      onChange={(id, value) => setFields((v) => ({ ...v, [id]: value }))}
-                    />
-                  </>
-                )}
-                <Separator />
-                <PaymentStep
+              {screen === "identity" && state && (
+                <IdentityStep
                   state={state}
-                  hasItems={hasItems}
-                  paying={paying}
-                  cancelled={paymentCancelled}
-                  onPay={() => void pay()}
-                  onSwitchPerson={() => void restart()}
-                  accentColor={accentColor}
+                  googleBusy={googleBusy}
+                  sentTo={sentTo}
+                  resendIn={resendIn}
+                  onGoogle={openGoogle}
+                  onSend={sendCode}
+                  onCode={verifyCode}
                 />
-              </>
-            )}
+              )}
+
+              {screen === "checkout" && state && (
+                <>
+                  {(branchLabel || state.identity.verified) && (
+                    <div className="flex items-center justify-between gap-3 rounded-xl bg-muted/60 px-3 py-2 text-sm">
+                      <p className="flex min-w-0 items-center gap-2">
+                        <CheckCircle2Icon className="size-4 shrink-0 text-primary" style={{ color: accentColor }} />
+                        <span className="truncate">
+                          {[branchLabel, state.identity.verified ? state.identity.email : null].filter(Boolean).join(" · ")}
+                        </span>
+                      </p>
+                      <button type="button" onClick={() => void restart()} className="shrink-0 text-xs underline underline-offset-4">
+                        Change
+                      </button>
+                    </div>
+                  )}
+                  <TicketPicker state={state} qty={qty} onQty={(id, n) => void changeQty(id, n)} />
+                  {state.identity.method === "NONE" && !state.identity.verified && (
+                    <Field>
+                      <FieldLabel htmlFor="checkout-contact">Email for your tickets</FieldLabel>
+                      <Input
+                        id="checkout-contact"
+                        type="email"
+                        autoComplete="email"
+                        inputMode="email"
+                        value={contact}
+                        onChange={(e) => setContact(e.target.value)}
+                        placeholder="you@example.com"
+                        className="h-11"
+                        required
+                      />
+                      <FieldDescription>Your tickets are shown here and emailed to this address.</FieldDescription>
+                    </Field>
+                  )}
+                  {state.branding.customFields.length > 0 && (
+                    <>
+                      <Separator />
+                      <DetailsFields
+                        fields={state.branding.customFields}
+                        values={fields}
+                        onChange={(id, value) => setFields((v) => ({ ...v, [id]: value }))}
+                      />
+                    </>
+                  )}
+                  <Separator />
+                  <PaymentStep
+                    state={state}
+                    hasItems={hasItems}
+                    paying={paying}
+                    cancelled={paymentCancelled}
+                    onPay={() => void pay()}
+                    onSwitchPerson={() => void restart()}
+                    accentColor={accentColor}
+                  />
+                </>
+              )}
+
+            </fieldset>
 
             {screen === "done" && state && (
               <DoneStep

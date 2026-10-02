@@ -3,6 +3,7 @@ import { ObjectId } from "mongodb";
 import { NextResponse } from "next/server";
 import {
   CHECKOUT_COOKIE,
+  CONSENT_REQUIRED,
   branchClaimedUnitsFor,
   claimedUnitsFor,
   getSessionByResumeToken,
@@ -56,6 +57,7 @@ export async function POST() {
       { status: 403 },
     );
   }
+  if (!session.consentAt) return NextResponse.json(CONSENT_REQUIRED, { status: 428 });
   if (session.orderId) {
     return NextResponse.json(
       { error: "This order has already been created" },
@@ -255,6 +257,8 @@ export async function POST() {
     flowBranch: session.branch?.value ?? null,
     identityMethod: session.identity.via,
     utm: session.utm,
+    consentAt: session.consentAt,
+    noticeVersion: session.noticeVersion ?? null,
     lookupKeys: lookupKeys.length ? lookupKeys : null,
     // Labelled from the organizer's own field list, so the orders export reads
     // "Full name" rather than the internal `cf_name` id. An id the branding no

@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import {
   CHECKOUT_COOKIE,
+  CONSENT_REQUIRED,
   branchClaimedUnitsFor,
   flowForSession,
   consumeOtp,
@@ -55,6 +56,8 @@ export async function POST(request: Request) {
   if (!session) {
     return NextResponse.json({ message: GENERIC }, { status: 202 });
   }
+  // Same answer for every address, so this says nothing about eligibility.
+  if (!session.consentAt) return NextResponse.json(CONSENT_REQUIRED, { status: 428 });
 
   const parsed = requestSchema.safeParse(await request.json().catch(() => ({})));
   if (!parsed.success) {
