@@ -1,0 +1,341 @@
+import { cookies } from "next/headers";
+import { NextResponse } from "next/server";
+import { auth } from "@/lib/auth";
+import {
+  CHECKOUT_COOKIE,
+  RESUME_TTL_MS,
+  answerStep,
+  branchClaimedUnitsFor,
+  claimedUnitsFor,
+  createCheckoutSession,
+  getCheckoutSession,
+  getSessionByResumeToken,
+  saveCustomFields,
+  saveQuantity,
+  setResumeToken,
+} from "@/lib/checkout";
+import { getBranding } from "@/lib/branding";
+import { getDb, toObjectId } from "@/lib/db";
+import { getTicketTypes } from "@/lib/events";
+import { emailMatchesIdentity, getActiveFlow, resolveOffer } from "@/lib/flows";
+import { getPlatformSettings, pricingPolicyFor } from "@/lib/platform-settings";
+import { computePricing } from "@/lib/pricing";
+import type { CheckoutFlow, Event, FlowOption, FlowStep, Organization, TicketType } from "@/lib/types";
+
+/**
+ * The checkout funnel, server-authoritative.
+ *
+ * One route family holds the whole state machine. The drawer is a thin renderer
+ * of what this returns: it can hide a step, but it cannot grant one, and every
+ * decision here is recomputed from the stored flow rather than trusted from the
+ * client. `POST /api/orders` re-runs the same `resolveOffer` before taking money.
+ */
+
+const MAX_TEXT = 200;
+
+async function loadSessionFromCookie() {
+  const jar = await cookies();
+  return getSessionByResumeToken(jar.get(CHECKOUT_COOKIE)?.value);
+}
+
+/** Attach the resume cookie. httpOnly so page script cannot read or forge it. */
+async function setResumeCookie(resumeToken: string) {
+  const jar = await cookies();
+  jar.set(CHECKOUT_COOKIE, resumeToken, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: Math.floor(RESUME_TTL_MS / 1000),
+  });
+}
+
+async function clearResumeCookie() {
+  const jar = await cookies();
+  jar.set(CHECKOUT_COOKIE, "", { httpOnly: true, path: "/", maxAge: 0 });
+}
+
+/**
+ * Everything the drawer needs to render its current step, in one payload.
+ * Re-resolved on every call — never cached client-side, never trusted from it.
+ */
+async function describe(session: NonNullable<Awaited<ReturnType<typeof getCheckoutSession>>>) {
+  const eventOid = toObjectId(session.eventId);
+  const db = await getDb();
+  const [event, flow, ticketTypes, branding] = await Promise.all([
+    eventOid ? db.collection<Event>("events").findOne({ _id: eventOid }) : null,
+    getActiveFlow(session.eventId),
+    getTicketTypes(session.eventId),
+    getBranding(session.eventId),
+  ]);
+
+  // A session whose event vanished or ended must not keep offering seats.
+  if (!event || event.status !== "PUBLISHED" || event.endsAt < new Date()) {
+    return { gone: true as const };
+  }
+
+  const branchValue = session.branch?.value ?? null;
+  const [claimed, branchClaimed] = await Promise.all([
+    session.identity.email
+      ? claimedUnitsFor(session.eventId, session.identity.email, branchValue)
+      : Promise.resolve(0),
+    branchValue ? branchClaimedUnitsFor(session.eventId, branchValue) : Promise.resolve(0),
+  ]);
+
+  const offer = resolveOffer({
+    flow,
+    answers: session.answers,
+    identity: {
+      method: session.identity.method,
+      email: session.identity.email,
+      verified: !!session.identity.verifiedAt,
+    },
+    ticketTypes: ticketTypes as TicketType[],
+    claimedUnits: claimed,
+    branchClaimedUnits: branchClaimed,
+  });
+
+  // The price breakdown for what is in the cart right now, computed here so the
+  // drawer only ever displays the figures the order route will charge.
+  const [org, settings] = await Promise.all([
+    db
+      .collection<Organization>("organizations")
+      .findOne({ _id: toObjectId(event.organizationId) as never }, { projection: { feeBps: 1, feeBearer: 1 } }),
+    getPlatformSettings(),
+  ]);
+  const policy = pricingPolicyFor(org ?? {}, event, settings);
+  const offered = new Map(offer.ticketTypes.map((t) => [t.id, t]));
+  const cart = offer.forcedItems
+    ? offer.forcedItems
+    : Object.entries(session.quantity).map(([ticketTypeId, quantity]) => ({ ticketTypeId, quantity }));
+  const lines = cart.flatMap((c) => {
+    const t = offered.get(c.ticketTypeId);
+    return t && c.quantity > 0 ? [{ unitPricePaise: t.pricePaise, quantity: c.quantity }] : [];
+  });
+  const quote = computePricing(lines, policy);
+
+  return {
+    gone: false as const,
+    event: { id: session.eventId, slug: event.slug, title: event.title, venue: event.venue },
+    pricing: {
+      feeBps: policy.feeBps,
+      gstBps: policy.gstBps,
+      bearer: policy.bearer,
+      gstLabel: settings.gst.splitRule === "ALWAYS_IGST" ? "IGST" : "GST",
+      quote: {
+        ticketTotalPaise: quote.ticketTotalPaise,
+        feePaise: quote.feePaise,
+        feeBasePaise: quote.feeBasePaise,
+        feeGstPaise: quote.feeGstPaise,
+        orderTotalPaise: quote.orderTotalPaise,
+      },
+    },
+    flow: { version: flow.version, steps: flow.steps },
+    answers: session.answers,
+    branch: session.branch,
+    identity: {
+      // The *resolved* method, not the stored one. The stored value is only
+      // written once an address has been verified, but the drawer has to know
+      // which method to ask the moment a branch is chosen — and the offer is
+      // where the branch policy has already been applied.
+      method: offer.identity.method,
+      email: session.identity.email,
+      verified: !!session.identity.verifiedAt,
+      via: session.identity.via,
+    },
+    offer,
+    branding: {
+      accentColor: branding.accentColor,
+      ctaLabel: branding.ctaLabel,
+      customFields: branding.customFields,
+    },
+    /** Only ever sent when the server already knows the address is verified. */
+    resumeTokenRequired: !session.identity.verifiedAt,
+  };
+}
+
+/** POST — open a drawer. Reuses a live session so a refresh does not lose answers. */
+export async function POST(request: Request) {
+  const body = (await request.json().catch(() => ({}))) as {
+    eventId?: string;
+    utm_source?: string;
+    utm_medium?: string;
+    utm_campaign?: string;
+  };
+  if (!body.eventId || !toObjectId(body.eventId)) {
+    return NextResponse.json({ error: "Invalid event" }, { status: 400 });
+  }
+  const db = await getDb();
+  const event = await db
+    .collection<Event>("events")
+    .findOne({ _id: toObjectId(body.eventId) as never, status: "PUBLISHED" });
+  if (!event || event.endsAt < new Date()) {
+    return NextResponse.json({ error: "This event is not available" }, { status: 404 });
+  }
+
+  // Returning to an unfinished funnel continues it rather than starting over.
+  const existing = await loadSessionFromCookie();
+  if (
+    existing &&
+    existing.eventId === event._id.toString() &&
+    (existing.status === "IN_PROGRESS" || existing.status === "IDENTITY_VERIFIED")
+  ) {
+    return NextResponse.json(await describe(existing), { status: 200 });
+  }
+
+  const flow = await getActiveFlow(event._id.toString());
+  // UTM is captured here, at the top of the funnel, and is the only place in the
+  // app that reads it. The QR code on a poster is the acquisition channel, so
+  // without this the campaign is unattributable end to end.
+  const session = await createCheckoutSession({
+    eventId: event._id.toString(),
+    flowVersion: flow.version,
+    utm: {
+      source: body.utm_source?.slice(0, MAX_TEXT) ?? null,
+      medium: body.utm_medium?.slice(0, MAX_TEXT) ?? null,
+      campaign: body.utm_campaign?.slice(0, MAX_TEXT) ?? null,
+    },
+  });
+  const resume = await setResumeToken(session.publicId, {});
+  await setResumeCookie(resume);
+  return NextResponse.json(await describe(session), { status: 201 });
+}
+
+/** GET — current state. Drives refresh, resume-after-magic-link, and the popup. */
+export async function GET() {
+  const session = await loadSessionFromCookie();
+  if (!session) return NextResponse.json({ error: "No checkout in progress" }, { status: 404 });
+  return NextResponse.json(await describe(session));
+}
+
+/** PATCH — answer a question, or bind an identity once it is proven. */
+export async function PATCH(request: Request) {
+  const session = await loadSessionFromCookie();
+  if (!session) return NextResponse.json({ error: "No checkout in progress" }, { status: 404 });
+  if (session.status === "EXPIRED") {
+    return NextResponse.json({ error: "This checkout expired. Please start again." }, { status: 410 });
+  }
+
+  const body = (await request.json().catch(() => ({}))) as {
+    action?: string;
+    stepId?: string;
+    value?: string;
+    email?: string;
+    customFields?: Record<string, string>;
+    quantity?: Record<string, number>;
+  };
+
+  if (body.action === "answer") {
+    if (!body.stepId || typeof body.value !== "string") {
+      return NextResponse.json({ error: "Invalid answer" }, { status: 400 });
+    }
+    const flow: CheckoutFlow = await getActiveFlow(session.eventId);
+    const step: FlowStep | undefined = flow.steps.find((s: FlowStep) => s.id === body.stepId);
+    if (!step) return NextResponse.json({ error: "Unknown step" }, { status: 400 });
+    if (step.kind === "SINGLE_CHOICE") {
+      // The answer must be one of the options the flow actually offers, so a
+      // crafted request cannot invent an audience the organizer never defined.
+      const option: FlowOption | undefined = step.options?.find(
+        (o: FlowOption) => o.value === body.value,
+      );
+      if (!option) return NextResponse.json({ error: "Invalid choice" }, { status: 400 });
+      await answerStep(session.publicId, step.id, option.value, {
+        stepId: step.id,
+        optionId: option.id,
+        value: option.value,
+      });
+    } else {
+      await answerStep(session.publicId, step.id, body.value, session.branch);
+    }
+    return NextResponse.json(await describe((await getCheckoutSession(session.publicId))!));
+  }
+
+  if (body.action === "identity") {
+    const flow: CheckoutFlow = await getActiveFlow(session.eventId);
+    const step: FlowStep | undefined = flow.steps.find(
+      (s: FlowStep) => s.kind === "SINGLE_CHOICE" && session.branch?.stepId === s.id,
+    );
+    const option: FlowOption | null =
+      step?.options?.find((o: FlowOption) => o.value === session.branch?.value) ?? null;
+    const required = option?.identity?.method ?? "NONE";
+
+    if (required === "GOOGLE") {
+      // Authority is the Google session, not anything the client sends.
+      const authSession = await auth();
+      const email = authSession?.user?.email?.toLowerCase() ?? null;
+      if (!authSession?.user?.id || !email) {
+        return NextResponse.json({ error: "Sign in with Google to continue" }, { status: 401 });
+      }
+      if (!emailMatchesIdentity(option?.identity ?? null, email)) {
+        return NextResponse.json(
+          { error: "That email address is not eligible for this ticket." },
+          { status: 403 },
+        );
+      }
+      const resume = await setResumeToken(session.publicId, {
+        method: "GOOGLE",
+        email,
+        userId: authSession.user.id,
+        verifiedAt: new Date(),
+        via: "GOOGLE",
+      });
+      await setResumeCookie(resume);
+      return NextResponse.json(await describe((await getCheckoutSession(session.publicId))!));
+    }
+
+    if (required === "EMAIL_OTP") {
+      // Reaching here without a verified session means the buyer needs the link.
+      return NextResponse.json(
+        { needsMagicLink: true, domain: option?.identity?.emailDomain ?? null },
+        { status: 428 },
+      );
+    }
+
+    return NextResponse.json({ error: "This event does not require sign-in" }, { status: 400 });
+  }
+
+  if (body.action === "quantity") {
+    // Stored, never trusted. The order route re-checks every number against the
+    // freshly resolved offer, so an out-of-range value here cannot sell a seat.
+    await saveQuantity(session.publicId, body.quantity ?? {});
+    return NextResponse.json({ ok: true });
+  }
+
+  if (body.action === "customFields") {
+    const branding = await getBranding(session.eventId);
+    const byId = new Map(branding.customFields.map((f) => [f.id, f]));
+    const submitted = body.customFields ?? {};
+    const clean: Record<string, string> = {};
+
+    // Required-ness is checked against the organizer's field list, not against
+    // what the client happened to send. Iterating the submission instead would
+    // let a client omit a required field entirely and pass, which is the one
+    // thing a required field exists to prevent.
+    for (const field of branding.customFields) {
+      if (!field.required) continue;
+      const raw = submitted[field.id];
+      if (typeof raw !== "string" || !raw.trim()) {
+        return NextResponse.json({ error: `${field.label} is required` }, { status: 400 });
+      }
+    }
+
+    for (const [id, raw] of Object.entries(submitted)) {
+      const field = byId.get(id);
+      // Drop unknown ids and truncate rather than reject, so a stale field from an
+      // older version of the form cannot block checkout.
+      if (!field || typeof raw !== "string") continue;
+      const value = raw.trim().slice(0, field.maxLength ?? 500);
+      if (value) clean[id] = value;
+    }
+    await saveCustomFields(session.publicId, clean);
+    return NextResponse.json(await describe((await getCheckoutSession(session.publicId))!));
+  }
+
+  return NextResponse.json({ error: "Unknown action" }, { status: 400 });
+}
+
+/** DELETE — abandon. The drawer can be closed and reopened without a new session. */
+export async function DELETE() {
+  await clearResumeCookie();
+  return NextResponse.json({ ok: true });
+}

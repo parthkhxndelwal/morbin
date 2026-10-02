@@ -43,6 +43,10 @@ export function getClientPromise(): Promise<MongoClient> {
   return globalThis.__morbin_mongo;
 }
 
+export function getDbName(): string {
+  return dbName;
+}
+
 export async function getDb(): Promise<Db> {
   const client = await getClientPromise();
   return client.db(dbName);
@@ -53,6 +57,8 @@ export async function ensureIndexes(): Promise<void> {
   const db = await getDb();
   await Promise.all([
     db.collection("users").createIndex({ email: 1 }, { unique: true }),
+    // Authorization reads every admin request by role; keep it indexed.
+    db.collection("users").createIndex({ role: 1 }),
     db.collection("organizations").createIndex({ slug: 1 }, { unique: true }),
     db.collection("organizations").createIndex({ ownerId: 1 }),
     db.collection("memberships").createIndex(
@@ -60,17 +66,78 @@ export async function ensureIndexes(): Promise<void> {
       { unique: true },
     ),
     db.collection("events").createIndex({ organizationId: 1, slug: 1 }, { unique: true }),
+    // Public event pages are looked up by slug alone, so the slug is globally
+    // unique. This index does double duty: it enforces that, and it is the only
+    // index that can serve `getPublishedEventBySlug` — without it every event
+    // page view is a collection scan.
+    db.collection("events").createIndex({ slug: 1 }, { unique: true }),
     db.collection("ticketTypes").createIndex({ eventId: 1 }),
     db.collection("orders").createIndex({ razorpayOrderId: 1 }, { unique: true }),
     db.collection("orders").createIndex({ razorpayPaymentId: 1 }, { sparse: true }),
     db.collection("orders").createIndex({ eventId: 1 }),
+    // Per-audience reporting (students vs outsiders) and per-branch cap counts.
+    db.collection("orders").createIndex({ eventId: 1, flowBranch: 1, status: 1 }),
     db.collection("tickets").createIndex({ code: 1 }, { unique: true }),
     db.collection("tickets").createIndex({ orderId: 1 }),
     db.collection("tickets").createIndex({ attendeeEmail: 1 }),
     db.collection("tickets").createIndex({ eventId: 1, status: 1 }),
+    // "How many seats has this verified email already taken under this audience?"
+    // is answered entirely from `tickets` so it stays a single-collection count.
+    db.collection("tickets").createIndex({
+      eventId: 1,
+      attendeeEmail: 1,
+      flowBranch: 1,
+      status: 1,
+    }),
     db.collection("orders").createIndex({ status: 1, createdAt: 1 }),
     db.collection("razorpayWebhooks").createIndex({ providerEventId: 1 }, { unique: true }),
     db.collection("emailDeliveries").createIndex({ status: 1 }),
     db.collection("waitlist").createIndex({ email: 1 }, { unique: true }),
+
+    // Checkout flow
+    db.collection("checkoutFlows").createIndex({ eventId: 1, version: 1 }, { unique: true }),
+    db.collection("checkoutFlows").createIndex({ eventId: 1, status: 1 }),
+    db.collection("eventBranding").createIndex({ eventId: 1 }, { unique: true }),
+    // publicId is the unguessable handle in checkout URLs; the hashed email
+    // token is looked up on every magic-link click, and both are unique so a
+    // collision fails loudly instead of resuming the wrong buyer.
+    db.collection("checkoutSessions").createIndex({ publicId: 1 }, { unique: true }),
+    // `partialFilterExpression` rather than `sparse`: a sparse index only skips
+    // *absent* fields, and these are explicitly set to null on a fresh session.
+    // Every open drawer would then collide on `{ otpTokenHash: null }`. This
+    // filter indexes only real strings, so unset and null are both ignored.
+    db.collection("checkoutSessions").createIndex(
+      { otpTokenHash: 1 },
+      { unique: true, partialFilterExpression: { otpTokenHash: { $type: "string" } } },
+    ),
+    db.collection("checkoutSessions").createIndex(
+      { resumeTokenHash: 1 },
+      { unique: true, partialFilterExpression: { resumeTokenHash: { $type: "string" } } },
+    ),
+    db.collection("checkoutSessions").createIndex({ eventId: 1, status: 1 }),
+    db.collection("checkoutSessions").createIndex({ expiresAt: 1 }),
+
+    // Money
+    db.collection("ledgerEntries").createIndex({ key: 1 }, { unique: true }),
+    db.collection("ledgerEntries").createIndex({ organizationId: 1, payoutId: 1, createdAt: 1 }),
+    db.collection("ledgerEntries").createIndex({ payoutId: 1 }),
+    db.collection("payouts").createIndex({ organizationId: 1, status: 1, createdAt: -1 }),
+    db.collection("payouts").createIndex({ status: 1, createdAt: -1 }),
+    db.collection("payoutMessages").createIndex({ payoutId: 1, createdAt: 1 }),
+    db.collection("refundCases").createIndex({ organizationId: 1, status: 1, createdAt: -1 }),
+    db.collection("refundCases").createIndex({ status: 1, createdAt: -1 }),
+    db.collection("refundCases").createIndex({ orderId: 1 }),
+    db.collection("refundCases").createIndex({ razorpayRefundId: 1 }, { sparse: true }),
+    db.collection("tickets").createIndex({ refundCaseId: 1 }, { sparse: true }),
+    db.collection("orders").createIndex({ organizationId: 1, status: 1, createdAt: -1 }),
+    db.collection("orders").createIndex({ organizationId: 1, paidAt: 1 }),
+
+    // Platform
+    db.collection("documents").createIndex({ organizationId: 1, kind: 1 }),
+    db.collection("auditLogs").createIndex({ at: -1 }),
+    db.collection("auditLogs").createIndex({ organizationId: 1, at: -1 }),
+    db.collection("notifications").createIndex({ audience: 1, organizationId: 1, readAt: 1, createdAt: -1 }),
+    db.collection("emailDeliveries").createIndex({ status: 1, nextAttemptAt: 1 }),
+    db.collection("emailDeliveries").createIndex({ kind: 1, ticketId: 1 }),
   ]);
 }

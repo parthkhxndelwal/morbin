@@ -1,10 +1,11 @@
+import type { ClientSession, Db } from "mongodb";
 import { getDb } from "@/lib/db";
 import { makeTicketCode, signTicket, ticketQrSvg } from "@/lib/tickets";
 import type { EmailRecord, Event, Order, Ticket } from "@/lib/types";
 
 /**
- * Build ticket documents for a paid/free order (idempotent caller must check
- * for existing tickets first). Attendees fall back to buyer details.
+ * Build ticket documents for a paid order (one per seat). Attendees fall back
+ * to the buyer's details. Pure apart from random codes; the caller inserts.
  */
 export function buildTickets(order: Order): Ticket[] {
   const pools = new Map<string, { name: string; email: string }[]>();
@@ -24,56 +25,71 @@ export function buildTickets(order: Order): Ticket[] {
         eventId: order.eventId,
         ticketTypeId: item.ticketTypeId,
         attendeeName: attendee.name,
-        attendeeEmail: attendee.email,
+        attendeeEmail: attendee.email.toLowerCase(),
         code,
         qrPayload: signTicket(code),
         status: "VALID",
         checkedInAt: null,
+        unitPricePaise: item.unitPricePaise,
+        refundCaseId: null,
+        // Denormalised: the per-audience cap counts against these.
+        flowBranch: order.flowBranch ?? null,
+        flowVersion: order.flowVersion ?? null,
       });
     }
   }
   return tickets;
 }
 
-/** Insert tickets + queue TICKET emails. Returns inserted ticket count. */
-export async function fulfillOrderTickets(
+/**
+ * Insert an order's tickets inside the caller's transaction, unless the order
+ * already has some (a retried capture). Returns the order's tickets.
+ */
+export async function insertTicketsOnce(
+  db: Db,
+  session: ClientSession,
   order: Order,
-  eventDoc: Event | null,
-): Promise<number> {
-  const db = await getDb();
-  // Idempotency: never double-fulfill an order.
-  const existing = await db
-    .collection("tickets")
-    .countDocuments({ orderId: order._id!.toString() });
-  if (existing > 0) return existing;
-
+): Promise<Ticket[]> {
+  const orderId = order._id!.toString();
+  const existing = await db.collection<Ticket>("tickets").find({ orderId }, { session }).toArray();
+  if (existing.length > 0) return existing;
   const tickets = buildTickets(order);
-  if (tickets.length === 0) return 0;
-  const inserted = await db.collection<Ticket>("tickets").insertMany(tickets);
-  const ids = Object.values(inserted.insertedIds);
+  if (tickets.length === 0) return [];
+  const inserted = await db.collection<Ticket>("tickets").insertMany(tickets, { session });
+  return tickets.map((t, i) => ({ ...t, _id: inserted.insertedIds[i] }));
+}
+
+/**
+ * Queue one ticket email per ticket. Runs after the capture transaction has
+ * committed, so an email is never sent for a payment that rolled back. Keyed by
+ * ticket id, so a retried capture can't queue duplicates.
+ */
+export async function queueTicketEmails(order: Order, event: Event | null, tickets: Ticket[]): Promise<void> {
+  if (tickets.length === 0) return;
+  const db = await getDb();
   const qrCache = new Map<string, string | null>();
-  const emailDocs: EmailRecord[] = [];
-  for (let i = 0; i < tickets.length; i++) {
-    const t = tickets[i];
+  for (const t of tickets) {
     if (!qrCache.has(t.qrPayload)) qrCache.set(t.qrPayload, await ticketQrSvg(t.qrPayload));
-    emailDocs.push({
+    const ticketId = t._id?.toString() ?? null;
+    const doc: EmailRecord = {
       orderId: order._id!.toString(),
-      ticketId: ids[i]?.toString() ?? null,
+      ticketId,
       recipient: t.attendeeEmail,
       kind: "TICKET",
       status: "QUEUED",
       attempts: 0,
       lastError: null,
       meta: {
-        eventTitle: eventDoc?.title ?? "Your event",
-        eventVenue: eventDoc?.venue ?? "",
-        eventStartsAt: eventDoc?.startsAt?.toISOString() ?? "",
+        eventTitle: event?.title ?? "Your event",
+        eventVenue: event?.venue ?? "",
+        eventStartsAt: event?.startsAt?.toISOString() ?? "",
         attendeeName: t.attendeeName,
         ticketCode: t.code,
         qrSvg: qrCache.get(t.qrPayload) ?? null,
       },
-    });
+    };
+    await db
+      .collection<EmailRecord>("emailDeliveries")
+      .updateOne({ kind: "TICKET", ticketId }, { $setOnInsert: doc }, { upsert: true });
   }
-  await db.collection("emailDeliveries").insertMany(emailDocs);
-  return tickets.length;
 }

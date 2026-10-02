@@ -19,6 +19,10 @@ export async function getRazorpay(): Promise<RzpInstance> {
   return cached;
 }
 
+/**
+ * Create the Razorpay order a buyer pays against. Only ids go in `notes` —
+ * never names, emails or phone numbers (DPDP minimisation).
+ */
 export async function createTicketOrder({
   amountPaise,
   receipt,
@@ -37,16 +41,22 @@ export async function createTicketOrder({
   })) as { id: string; amount: number; currency: string; status: string };
 }
 
-export async function fetchPayment(paymentId: string) {
+export interface RazorpayPayment {
+  id: string;
+  order_id: string | null;
+  amount: number;
+  currency: string;
+  status: string;
+  captured: boolean;
+  method: string | null;
+  /** Razorpay's fee for this payment in paise, including `tax`. */
+  fee: number | null;
+  tax: number | null;
+}
+
+export async function fetchPayment(paymentId: string): Promise<RazorpayPayment> {
   const rzp = await getRazorpay();
-  return (await rzp.payments.fetch(paymentId)) as {
-    id: string;
-    order_id: string | null;
-    amount: number;
-    currency: string;
-    status: string;
-    captured: boolean;
-  };
+  return (await rzp.payments.fetch(paymentId)) as RazorpayPayment;
 }
 
 /** Verify webhook signature over the RAW request body. */
@@ -67,34 +77,47 @@ export function verifyWebhookSignature(
   }
 }
 
-/** Create a Route transfer of captured funds to the organizer's linked account. */
-export async function createOrganizerTransfer({
-  account,
-  amountPaise,
-  notes,
-}: {
-  account: string;
-  amountPaise: number;
-  notes: Record<string, string>;
-}) {
-  const rzp = await getRazorpay();
-  return (await rzp.transfers.create({
-    account,
-    amount: amountPaise,
-    currency: "INR",
-    notes,
-  })) as { id: string; status: string };
+export interface RazorpayRefund {
+  id: string;
+  payment_id: string;
+  amount: number;
+  status: "pending" | "processed" | "failed";
+  speed_processed?: string | null;
+  acquirer_data?: { arn?: string | null; rrn?: string | null } | null;
+  notes?: Record<string, string> | null;
 }
 
-/** Refund a captured payment (optionally reversing transfers). */
-export async function refundPayment(
-  paymentId: string,
-  amountPaise: number,
-  reverseAll = true,
-) {
+/**
+ * Refund part of a captured payment to the customer's original method.
+ *
+ * `refundCaseItemId` goes into the refund's notes and is looked up first, so a
+ * retry after a timeout finds the refund the first attempt created instead of
+ * refunding twice.
+ */
+export async function refundPayment(input: {
+  paymentId: string;
+  amountPaise: number;
+  speed: "normal" | "optimum";
+  refundCaseId: string;
+}): Promise<RazorpayRefund> {
   const rzp = await getRazorpay();
-  return (await rzp.payments.refund(paymentId, {
-    amount: amountPaise,
-    reverse_all: reverseAll,
-  })) as { id: string; status: string };
+  const existing = await findRefundForCase(input.paymentId, input.refundCaseId);
+  if (existing) return existing;
+  return (await rzp.payments.refund(input.paymentId, {
+    amount: input.amountPaise,
+    speed: input.speed,
+    receipt: input.refundCaseId.slice(0, 40),
+    notes: { refundCaseId: input.refundCaseId },
+  })) as RazorpayRefund;
+}
+
+export async function findRefundForCase(
+  paymentId: string,
+  refundCaseId: string,
+): Promise<RazorpayRefund | null> {
+  const rzp = await getRazorpay();
+  const list = (await rzp.payments.fetchMultipleRefund(paymentId, { count: 100 })) as {
+    items: RazorpayRefund[];
+  };
+  return list.items.find((r) => r.notes?.refundCaseId === refundCaseId) ?? null;
 }
