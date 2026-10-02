@@ -14,33 +14,31 @@ type State =
  * The token is spent by the server on the first attempt and never retried, so a
  * refresh — or an email client that pre-fetches the link — cannot burn it. The
  * `claimed` ref is the guard: React 18+ mounts effects twice in development, and
- * a second POST would be reported as "already used" to a buyer who did nothing
- * wrong.
+ * a second request would be reported as "already used" to a buyer who did
+ * nothing wrong.
  */
 export function VerifyMagicLink({ token }: { token: string }) {
-  const [state, setState] = useState<State>({ kind: "working" });
+  const [state, setState] = useState<State>(() =>
+    token
+      ? { kind: "working" }
+      : {
+          kind: "invalid",
+          reason: "This link is missing its code. Request a new one from the event page.",
+          eventSlug: null,
+          canRetry: false,
+        },
+  );
   const claimed = useRef(false);
 
   useEffect(() => {
-    if (claimed.current) return;
+    if (!token || claimed.current) return;
     claimed.current = true;
-
-    if (!token) {
-      setState({
-        kind: "invalid",
-        reason: "This link is missing its code. Request a new one from the event page.",
-        eventSlug: null,
-        canRetry: false,
-      });
-      return;
-    }
-
-    const controller = new AbortController();
+    // Deliberately not aborted on cleanup: in development React runs this
+    // effect twice, and aborting the first request while the ref blocks the
+    // second left the page on "Confirming…" forever.
     (async () => {
       try {
-        const res = await fetch(`/api/checkout/magic-link?token=${encodeURIComponent(token)}`, {
-          signal: controller.signal,
-        });
+        const res = await fetch(`/api/checkout/magic-link?token=${encodeURIComponent(token)}`);
         const body = await res.json().catch(() => ({}));
         if (res.ok && body.ok) {
           setState({ kind: "done", eventSlug: body.eventSlug ?? null });
@@ -57,8 +55,7 @@ export function VerifyMagicLink({ token }: { token: string }) {
           eventSlug: body.eventSlug ?? null,
           canRetry: !!body.canRetry,
         });
-      } catch (err) {
-        if ((err as Error)?.name === "AbortError") return;
+      } catch {
         setState({
           kind: "invalid",
           reason: "We couldn't reach the server. Check your connection and try again.",
@@ -67,7 +64,6 @@ export function VerifyMagicLink({ token }: { token: string }) {
         });
       }
     })();
-    return () => controller.abort();
   }, [token]);
 
   if (state.kind === "working") {

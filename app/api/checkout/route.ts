@@ -13,6 +13,7 @@ import {
   getCheckoutSession,
   getSessionByResumeToken,
   saveCustomFields,
+  setContactEmail,
   saveQuantity,
   setResumeToken,
 } from "@/lib/checkout";
@@ -373,11 +374,33 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "This event does not require sign-in" }, { status: 400 });
   }
 
+  if (body.action === "contact") {
+    // Only for groups that verify nobody: everyone else's address comes from
+    // Google or a confirmed link, never from this field.
+    const flow = await flowForSession(session);
+    const method = resolveOffer({
+      flow,
+      answers: session.answers,
+      identity: { method: session.identity.method, email: session.identity.email, verified: !!session.identity.verifiedAt },
+      ticketTypes: [],
+    }).identity.method;
+    if (method !== "NONE" || session.identity.verifiedAt) {
+      return NextResponse.json({ error: "Confirm your email to continue" }, { status: 403 });
+    }
+    const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 200) {
+      return NextResponse.json({ error: "Enter a valid email address for your tickets." }, { status: 400 });
+    }
+    await setContactEmail(session.publicId, email);
+    return NextResponse.json(await describe((await getCheckoutSession(session.publicId))!));
+  }
+
   if (body.action === "quantity") {
     // Stored, never trusted. The order route re-checks every number against the
     // freshly resolved offer, so an out-of-range value here cannot sell a seat.
     await saveQuantity(session.publicId, body.quantity ?? {});
-    return NextResponse.json({ ok: true });
+    // The fresh state carries the price breakdown for exactly this cart.
+    return NextResponse.json(await describe((await getCheckoutSession(session.publicId))!));
   }
 
   if (body.action === "customFields") {
