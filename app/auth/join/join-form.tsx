@@ -8,6 +8,7 @@ import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/c
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import type { Result } from "@/lib/result";
+import { PASSWORD_RULES_TEXT } from "@/lib/validations";
 
 /**
  * Name + password for an account someone else started (a team invite, or an
@@ -89,7 +90,7 @@ export function JoinForm({
             aria-invalid={!!errors.password || undefined}
             required
           />
-          <FieldDescription>At least 8 characters, with an uppercase letter and a number.</FieldDescription>
+          <FieldDescription>{PASSWORD_RULES_TEXT}</FieldDescription>
           <FieldError>{errors.password}</FieldError>
         </Field>
         <Field data-invalid={!!errors.confirm || undefined}>

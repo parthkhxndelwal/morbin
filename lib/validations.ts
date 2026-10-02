@@ -210,6 +210,10 @@ export const teamInviteSchema = z.object({
 });
 
 /** Someone accepting a team invite: their name and a new password. */
+/** What a password must contain — shown wherever one is chosen, enforced by joinTeamSchema. */
+export const PASSWORD_RULES = [`At least ${MIN_PASSWORD_LENGTH} characters`, "an uppercase letter", "a number"] as const;
+export const PASSWORD_RULES_TEXT = `${PASSWORD_RULES[0]}, with ${PASSWORD_RULES[1]} and ${PASSWORD_RULES[2]}.`;
+
 export const joinTeamSchema = z
   .object({
     name: z.string().trim().min(2, "At least 2 characters").max(80, "At most 80 characters"),

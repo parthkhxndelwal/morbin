@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { AuthLayout } from "@/components/features/auth/auth-layout";
 import { getInviteView } from "@/lib/team";
 import { acceptInviteAction } from "./actions";
 import { JoinForm } from "./join-form";
@@ -28,40 +28,51 @@ const DEAD_LINK: Record<"expired" | "used" | "invalid", { title: string; body: s
   },
 };
 
-export default async function JoinPage({ searchParams }: { searchParams: Promise<{ token?: string }> }) {
+export default async function JoinPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ token?: string }>;
+}) {
   const { token = "" } = await searchParams;
   const invite = await getInviteView(token);
 
   return (
-    <main className="flex min-h-dvh flex-col items-center justify-center gap-6 bg-muted/40 px-4 py-10">
-      <Link href="/" className="text-lg font-semibold tracking-tight">
-        Morbin
-      </Link>
-      <Card className="w-full max-w-sm">
-        {invite.state === "valid" ? (
-          <>
-            <CardHeader>
-              <CardTitle>Join {invite.organizationName}</CardTitle>
-              <CardDescription>Set up your Morbin account to see events and check tickets in.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <JoinForm token={token} email={invite.email} defaultName={invite.name ?? ""} action={acceptInviteAction} />
-            </CardContent>
-          </>
-        ) : (
-          <>
-            <CardHeader>
-              <CardTitle>{DEAD_LINK[invite.state].title}</CardTitle>
-              <CardDescription>{DEAD_LINK[invite.state].body}</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Button variant="outline" className="w-full" nativeButton={false} render={<Link href="/auth" />}>
-                Go to sign in
-              </Button>
-            </CardContent>
-          </>
-        )}
-      </Card>
-    </main>
+    <AuthLayout>
+      {invite.state === "valid" ? (
+        <div className="space-y-6">
+          <div className="space-y-2">
+            <h1 className="text-2xl font-semibold tracking-tight">
+              Join {invite.organizationName}
+            </h1>
+            <p className="text-sm text-muted-foreground">
+              Set up your Morbin account to see events and check tickets in.
+            </p>
+          </div>
+          <JoinForm
+            token={token}
+            email={invite.email}
+            defaultName={invite.name ?? ""}
+            action={acceptInviteAction}
+          />
+        </div>
+      ) : (
+        <div className="space-y-6">
+          <div className="space-y-2">
+            <h1 className="text-2xl font-semibold tracking-tight">
+              {DEAD_LINK[invite.state].title}
+            </h1>
+            <p className="text-sm text-muted-foreground">{DEAD_LINK[invite.state].body}</p>
+          </div>
+          <Button
+            variant="outline"
+            className="w-full"
+            nativeButton={false}
+            render={<Link href="/auth" />}
+          >
+            Go to sign in
+          </Button>
+        </div>
+      )}
+    </AuthLayout>
   );
 }
