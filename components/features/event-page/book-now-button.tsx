@@ -48,16 +48,22 @@ function useGlassAllowed(): boolean | null {
 
 export function BookNowButton({
   label,
+  detail,
   eventTitle,
   accentColor,
   onClick,
+  onPrefetch,
   className,
   height = 56,
 }: {
   label: string;
+  /** Secondary text on the right, e.g. the price. */
+  detail?: string | null;
   eventTitle: string;
   accentColor: string;
   onClick: () => void;
+  /** Hover / focus / touch: warm up whatever the click will need. */
+  onPrefetch?: () => void;
   className?: string;
   height?: number;
 }) {
@@ -71,11 +77,20 @@ export function BookNowButton({
       <button
         type="button"
         onClick={onClick}
+        onPointerEnter={onPrefetch}
+        onFocus={onPrefetch}
+        onTouchStart={onPrefetch}
         aria-label={`${label} — ${eventTitle}`}
-        className={cn(ring, "w-full px-6 text-base font-semibold text-white shadow-lg transition-transform active:scale-[0.99]", className)}
+        className={cn(
+          ring,
+          "flex w-full items-center justify-between gap-3 px-7 text-base font-semibold text-white shadow-lg transition-transform active:scale-[0.99]",
+          !detail && "justify-center",
+          className,
+        )}
         style={{ backgroundColor: accentColor, height }}
       >
-        {label}
+        <span>{label}</span>
+        {detail && <span className="text-sm font-medium text-white/85">{detail}</span>}
       </button>
     );
   }
@@ -84,11 +99,17 @@ export function BookNowButton({
     <button
       type="button"
       onClick={onClick}
+      onPointerEnter={onPrefetch}
+      onFocus={onPrefetch}
+      onTouchStart={onPrefetch}
       aria-label={`${label} — ${eventTitle}`}
       className={cn(ring, "group block w-full transition-transform active:scale-[0.99]", className)}
     >
       <GlassSurface {...GLASS_SETTINGS} width="100%" height={height}>
-        <span className="text-base font-semibold text-foreground drop-shadow-sm">{label}</span>
+        <span className={cn("flex w-full items-center gap-3 px-5", detail ? "justify-between" : "justify-center")}>
+          <span className="text-base font-semibold text-foreground drop-shadow-sm">{label}</span>
+          {detail && <span className="text-sm font-medium text-muted-foreground">{detail}</span>}
+        </span>
       </GlassSurface>
     </button>
   );
