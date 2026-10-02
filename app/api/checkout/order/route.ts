@@ -131,6 +131,11 @@ export async function POST() {
   if (flow.steps.some((s) => s.kind === "IDENTITY" && s.required) && !session.identity.verifiedAt) {
     return NextResponse.json({ error: "Please confirm your email to continue" }, { status: 403 });
   }
+  // Any group that verifies (Google, email link, ID-derived email) must have
+  // done so; only a NONE group books with an unverified contact address.
+  if (offer.identity.method !== "NONE" && !session.identity.verifiedAt) {
+    return NextResponse.json({ error: "Please confirm your email to continue" }, { status: 403 });
+  }
   if (offer.soldOutForIdentity) {
     return NextResponse.json({ error: "No tickets available for you" }, { status: 409 });
   }

@@ -183,6 +183,19 @@ export function derivedEmailOf(session: Pick<CheckoutSession, "lookups">, stepId
   return session.lookups?.[stepId]?.derivedEmail ?? null;
 }
 
+/**
+ * The address tickets go to when the buyer's group needs no verification
+ * (identity NONE). Unverified by design, so callers must only accept it when
+ * the resolved identity method is NONE.
+ */
+export async function setContactEmail(publicId: string, email: string): Promise<void> {
+  const db = await getDb();
+  await db.collection<CheckoutSession>("checkoutSessions").updateOne(
+    { publicId, status: { $in: ["IN_PROGRESS", "IDENTITY_VERIFIED"] }, "identity.verifiedAt": null },
+    { $set: { "identity.email": email.trim().toLowerCase(), "identity.via": null, updatedAt: new Date() } },
+  );
+}
+
 export async function saveCustomFields(
   publicId: string,
   fields: Record<string, string>,

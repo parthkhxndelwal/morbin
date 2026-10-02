@@ -17,7 +17,7 @@ import { getDb, toObjectId } from "@/lib/db";
 import { appUrl } from "@/lib/email";
 import { emailMatchesIdentity } from "@/lib/flows";
 import { lookupIdentityStep } from "@/lib/flow-rules";
-import type { CheckoutFlow, EmailRecord, Event, FlowOption, FlowStep } from "@/lib/types";
+import type { CheckoutFlow, EmailRecord, Event, FlowOption } from "@/lib/types";
 
 /**
  * The college-email branch of the funnel.
