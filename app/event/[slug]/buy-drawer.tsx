@@ -1,5 +1,6 @@
 "use client";
 
+import { CheckCircle2Icon } from "lucide-react";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { DetailsFields, TicketPicker } from "@/components/features/checkout/ticket-picker";
 import { DoneStep } from "@/components/features/checkout/done-step";
@@ -15,9 +16,10 @@ import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { cn } from "@/lib/utils";
 
 /**
- * The booking drawer: orchestration only.
+ * The booking sheet: orchestration only.
  *
  * Every screen is a function of one server payload (`/api/checkout`). The
  * client decides *nothing* about what a buyer may do — no step is revealed
@@ -25,9 +27,11 @@ import { useIsMobile } from "@/hooks/use-mobile";
  * the server resolved and posts answers back, which keeps the rules in one
  * place (`lib/flow-rules.ts`). The screens live in components/features/checkout.
  *
- * The Google sign-in is a popup on purpose: this tab keeps its funnel state, so
- * returning from the popup resumes the drawer at the right step rather than
- * reloading the event page and losing the buyer's answers.
+ * It is built to feel like one short, continuous motion: a progress header,
+ * screens that slide into each other, email confirmed by a code typed right
+ * here (or the emailed link, noticed automatically), a single ticket
+ * pre-selected, the pay button pinned within reach, and the ticket itself
+ * shown at the end.
  */
 
 /**
@@ -39,14 +43,6 @@ import { useIsMobile } from "@/hooks/use-mobile";
  * ineligible one, which is exactly the signal the uniform response hides.
  */
 const RESEND_COOLDOWN_SECONDS = 45;
-
-const SCREEN_TITLES: Record<CheckoutScreen, string> = {
-  loading: "Opening checkout",
-  questions: "A quick question",
-  identity: "Confirm it's you",
-  checkout: "Your tickets",
-  done: "Booking complete",
-};
 
 declare global {
   interface Window {
@@ -61,43 +57,54 @@ function screenFor(s: CheckoutState): CheckoutScreen {
   return "checkout";
 }
 
+/** The journey this buyer actually takes, for the progress header. */
+function stagesFor(s: CheckoutState | null): { id: CheckoutScreen; label: string }[] {
+  const stages: { id: CheckoutScreen; label: string }[] = [];
+  if (s?.flow.steps.some((x) => x.kind === "SINGLE_CHOICE" || x.kind === "LOOKUP")) stages.push({ id: "questions", label: "Details" });
+  if (s && s.identity.method !== "NONE") stages.push({ id: "identity", label: "Verify" });
+  stages.push({ id: "checkout", label: "Tickets" }, { id: "done", label: "Done" });
+  return stages;
+}
+
 export function BuyDrawer({
   eventId,
-  slug,
   title,
   accentColor = "#7c3aed",
   ctaLabel,
   utm,
   autoOpen = false,
+  autoStart = false,
   testToken = null,
   trigger,
 }: {
   eventId: string;
+  /** The event's slug (links on the done screen come from the server's state). */
   slug: string;
   title: string;
   accentColor?: string;
   ctaLabel: string;
   utm?: { source?: string; medium?: string; campaign?: string } | null;
+  /** Resume a session from the cookie (back from an emailed link). */
   autoOpen?: boolean;
+  /** Open and start checkout on mount — the caller loaded this on a click. */
+  autoStart?: boolean;
   /** Signed by "Run through checkout as a buyer"; opens a test-mode checkout with the draft rules. */
   testToken?: string | null;
-  /** Custom call to action (e.g. the event page's Book-now button). Defaults to a solid accent button. */
+  /** Custom call to action (e.g. the event page's Book-now dock). Defaults to a solid accent button. */
   trigger?: (props: { onClick: () => void; label: string }) => React.ReactNode;
 }) {
   const isMobile = useIsMobile();
-  const [open, setOpen] = useState(autoOpen);
+  const [open, setOpen] = useState(autoOpen || autoStart);
   const [state, setState] = useState<CheckoutState | null>(null);
   const [screen, setScreen] = useState<CheckoutScreen>("loading");
   const [qty, setQty] = useState<Record<string, number>>({});
   const [fields, setFields] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
   const [googleBusy, setGoogleBusy] = useState(false);
-  const [linkSent, setLinkSent] = useState(false);
+  const [sentTo, setSentTo] = useState<string | null>(null);
   const [resendIn, setResendIn] = useState(0);
-  const [orderId, setOrderId] = useState<string | null>(null);
   const [paying, setPaying] = useState(false);
   const [paymentCancelled, setPaymentCancelled] = useState(false);
-  const [confirmed, setConfirmed] = useState(false);
   /** Where tickets go when the buyer's group verifies nobody (identity NONE). */
   const [contact, setContact] = useState("");
 
@@ -106,6 +113,19 @@ export function BuyDrawer({
   function apply(s: CheckoutState) {
     setState(s);
     setScreen(screenFor(s));
+    setError("");
+    // One thing to buy, and the stepper is the buyer's: start them at 1.
+    const buyable = s.offer.ticketTypes.filter((t) => t.maxSelectable > 0);
+    if (screenFor(s) === "checkout" && !s.offer.forcedItems && buyable.length === 1) {
+      setQty((q) => (Object.values(q).some((n) => n > 0) ? q : { [buyable[0].id]: 1 }));
+      void fetch("/api/checkout", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "quantity", quantity: { [buyable[0].id]: 1 } }),
+      })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((next) => next && setState(next));
+    }
   }
 
   async function read(): Promise<CheckoutState | null> {
@@ -142,28 +162,28 @@ export function BuyDrawer({
     }
   }
 
-  // Resuming after the magic link: the cookie now carries a verified session,
-  // so the drawer opens already past the identity step.
-  const resume = useEffectEvent(async () => {
-    try {
-      const s = await read();
-      if (s) {
-        apply(s);
-        setOpen(true);
-        return;
+  // Resume after an emailed link, or start straight away when the page loaded
+  // this component on a click. A timer, so React's dev double-run reads once.
+  const boot = useEffectEvent(async () => {
+    if (autoOpen) {
+      try {
+        const s = await read();
+        if (s) {
+          apply(s);
+          setOpen(true);
+          return;
+        }
+      } catch {
+        /* fall through to a fresh start */
       }
-    } catch {
-      /* fall through to a fresh start */
     }
     void start();
   });
   useEffect(() => {
-    if (!autoOpen) return;
-    // A callback rather than a direct call: React's dev double-run of effects
-    // clears the first timer, so the session is read once.
-    const t = setTimeout(() => void resume(), 0);
+    if (!autoOpen && !autoStart) return;
+    const t = setTimeout(() => void boot(), 0);
     return () => clearTimeout(t);
-  }, [autoOpen]);
+  }, [autoOpen, autoStart]);
 
   useEffect(() => {
     return () => {
@@ -171,12 +191,26 @@ export function BuyDrawer({
     };
   }, []);
 
-  // Countdown for the resend link.
+  // Countdown for "send a new code".
   useEffect(() => {
     if (resendIn <= 0) return;
     const t = setInterval(() => setResendIn((n) => Math.max(0, n - 1)), 1000);
     return () => clearInterval(t);
   }, [resendIn]);
+
+  // While waiting for a code, notice a tap on the emailed link in another tab.
+  const checkVerified = useEffectEvent(async () => {
+    const s = await read().catch(() => null);
+    if (s?.identity.verified) {
+      setSentTo(null);
+      apply(s);
+    }
+  });
+  useEffect(() => {
+    if (!open || screen !== "identity" || !sentTo) return;
+    const t = setInterval(() => void checkVerified(), 3000);
+    return () => clearInterval(t);
+  }, [open, screen, sentTo]);
 
   async function patch(body: Record<string, unknown>): Promise<CheckoutState | null> {
     const res = await fetch("/api/checkout", {
@@ -211,12 +245,9 @@ export function BuyDrawer({
   }
 
   /**
-   * Open the Google popup, then wait for the session to appear.
-   *
-   * Polling `/api/checkout/identity` beats trusting the popup's own message:
-   * the cookie is the ground truth, so this also covers the case where the
-   * popup is closed by the browser, by the buyer, or by a strict settings mode
-   * that never shows it. Cancelling simply never yields a session.
+   * Open the Google popup, then wait for the session to appear. Polling the
+   * cookie-backed identity route covers a popup closed by the buyer, the
+   * browser, or a strict settings mode; cancelling simply never yields one.
    */
   function openGoogle() {
     setError("");
@@ -235,7 +266,6 @@ export function BuyDrawer({
       setError("Your browser blocked the sign-in window. Allow popups and try again.");
       return;
     }
-    // Cancel path: the popup closing without a session is a normal outcome.
     const watchClosed = setInterval(() => {
       if (popup.closed) {
         clearInterval(watchClosed);
@@ -247,7 +277,6 @@ export function BuyDrawer({
     pollRef.current = setInterval(async () => {
       attempts += 1;
       if (attempts > 150) {
-        // ~3 minutes. The buyer simply never finished.
         clearInterval(pollRef.current!);
         setGoogleBusy(false);
         return;
@@ -267,16 +296,15 @@ export function BuyDrawer({
     }, 1200);
   }
 
-  async function requestLink(address: string) {
+  /** Email a code (and link). A test run confirms straight away and sends nothing. */
+  async function sendCode(address: string) {
     setError("");
     const res = await fetch("/api/checkout/magic-link", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      // With an ID-derived address the server decides where the link goes.
       body: JSON.stringify(address ? { email: address } : {}),
     });
     const body = await res.json().catch(() => ({}));
-    // A test run confirms the address without sending anything.
     if (res.ok && body.testVerified) {
       const s = await read();
       if (s) apply(s);
@@ -284,20 +312,37 @@ export function BuyDrawer({
     }
     // 202 either way: the response never reveals whether the address qualifies.
     if (res.status === 202) {
-      setLinkSent(true);
-      // The countdown is ours, started here: the server deliberately sends none.
+      setSentTo(address || state?.identity.lookupEmail || "your email");
       setResendIn(RESEND_COOLDOWN_SECONDS);
       return;
     }
-    setError(body.error ?? "Could not send the link.");
+    setError(body.error ?? "Could not send the code.");
+  }
+
+  async function verifyCode(code: string): Promise<boolean> {
+    setError("");
+    const res = await fetch("/api/checkout/code", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setError(body.error ?? "That code didn't work.");
+      if (body.reason === "attempts" || body.reason === "expired") setResendIn(0);
+      return false;
+    }
+    const s = await read();
+    if (s) {
+      setSentTo(null);
+      apply(s);
+    }
+    return true;
   }
 
   /**
-   * Persist the cart and refresh the priced state.
-   *
-   * Saving on every stepper press lets a refresh, a second tab, or the
-   * magic-link hand-off preserve the selection; the returned state carries the
-   * server's price breakdown for exactly this cart. The order route re-checks.
+   * Persist the cart and refresh the priced state: the returned state carries
+   * the server's price breakdown for exactly this cart. The order route re-checks.
    */
   async function changeQty(ticketTypeId: string, n: number) {
     const next = { ...qty, [ticketTypeId]: n };
@@ -307,6 +352,7 @@ export function BuyDrawer({
   }
 
   async function saveFields(): Promise<boolean> {
+    if ((state?.branding.customFields.length ?? 0) === 0) return true;
     const s = await patch({ action: "customFields", customFields: fields });
     if (!s) return false;
     setState(s);
@@ -352,9 +398,7 @@ export function BuyDrawer({
         setPaying(false);
         return;
       }
-      setOrderId(body.orderId);
       if (body.free) {
-        setConfirmed(true);
         setScreen("done");
         setPaying(false);
         return;
@@ -399,11 +443,10 @@ export function BuyDrawer({
       handler: () => {
         setPaying(false);
         setScreen("done");
-        void pollPaid();
       },
       modal: {
         ondismiss: () => {
-          // Cancelling is not a failure: the drawer stays where it was.
+          // Cancelling is not a failure: the sheet stays where it was.
           setPaying(false);
           setError("");
           setPaymentCancelled(true);
@@ -414,32 +457,18 @@ export function BuyDrawer({
     return true;
   }
 
-  /** The webhook is the source of truth; this only refreshes the receipt view. */
-  async function pollPaid() {
-    for (let i = 0; i < 40; i++) {
-      await new Promise((r) => setTimeout(r, 3000));
-      const res = await fetch("/api/checkout/payment", { method: "PATCH", cache: "no-store" });
-      if (!res.ok) continue;
-      const body = await res.json();
-      if (body.status === "PAID") {
-        setConfirmed(true);
-        return;
-      }
-    }
-  }
-
   /**
-   * Forget the verified identity and start again. A session cookie outlives a
-   * single purchase: without this, a shared device would silently book the
-   * second buyer under the first buyer's email.
+   * Forget the answers and identity and start again ("Change"). A session
+   * cookie outlives a purchase, so this is also how a shared device switches
+   * buyer without booking under the previous person's email.
    */
-  async function resetIdentity() {
+  async function restart() {
     setError("");
     setPaymentCancelled(false);
-    setConfirmed(false);
     setFields({});
     setQty({});
-    setLinkSent(false);
+    setSentTo(null);
+    setContact("");
     await fetch("/api/checkout/identity", { method: "DELETE" });
     await fetch("/api/checkout", { method: "DELETE" });
     setState(null);
@@ -447,6 +476,11 @@ export function BuyDrawer({
   }
 
   const label = ctaLabel || "Book now";
+  const stages = stagesFor(state);
+  const current = stages.findIndex((s) => s.id === screen);
+  const branchLabel =
+    state?.branch &&
+    state.flow.steps.find((s) => s.id === state.branch!.stepId)?.options?.find((o) => o.value === state.branch!.value)?.label;
 
   return (
     <>
@@ -466,18 +500,39 @@ export function BuyDrawer({
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetContent
           side={isMobile ? "bottom" : "right"}
-          className="max-h-[92dvh] gap-0 overflow-y-auto data-[side=bottom]:rounded-t-2xl data-[side=right]:max-h-none data-[side=right]:w-full data-[side=right]:sm:max-w-md"
+          className="max-h-[94dvh] gap-0 overflow-y-auto data-[side=bottom]:rounded-t-3xl data-[side=right]:max-h-none data-[side=right]:w-full data-[side=right]:sm:max-w-md"
         >
-          <SheetHeader className="border-b">
-            <SheetTitle className="pr-8">{title}</SheetTitle>
-            <SheetDescription>{SCREEN_TITLES[screen]}</SheetDescription>
+          <SheetHeader className="gap-3 pb-3">
+            {isMobile && <div aria-hidden className="mx-auto -mt-1 mb-1 h-1 w-10 rounded-full bg-muted-foreground/30" />}
+            <SheetTitle className="pr-8 text-lg">{title}</SheetTitle>
+            <SheetDescription className="sr-only">Book tickets in a few steps</SheetDescription>
+            {/* Where you are, and how little is left. */}
+            <ol className="flex gap-1.5" aria-label="Booking progress">
+              {stages.map((s, i) => (
+                <li key={s.id} className="flex-1 space-y-1" aria-current={i === current ? "step" : undefined}>
+                  <div
+                    className={cn(
+                      "h-1 rounded-full transition-colors duration-300",
+                      i <= current ? "bg-primary" : "bg-muted",
+                    )}
+                    style={i <= current ? { backgroundColor: accentColor } : undefined}
+                  />
+                  <p className={cn("text-[11px]", i === current ? "font-medium text-foreground" : "text-muted-foreground")}>
+                    {s.label}
+                  </p>
+                </li>
+              ))}
+            </ol>
           </SheetHeader>
           {/* Screen readers hear each step change, not just sighted buyers. */}
           <p className="sr-only" aria-live="polite">
-            {SCREEN_TITLES[screen]}
+            {current >= 0 ? `Step ${current + 1} of ${stages.length}: ${stages[current].label}` : "Loading"}
           </p>
 
-          <div className="space-y-5 p-4">
+          <div
+            key={`${screen}:${state?.offer.missingRequiredSteps[0] ?? ""}`}
+            className="space-y-5 p-4 pt-1 animate-in fade-in slide-in-from-right-3 duration-300 motion-reduce:animate-none"
+          >
             {error && (
               <Alert variant="destructive" role="alert">
                 <AlertDescription>{error}</AlertDescription>
@@ -487,8 +542,8 @@ export function BuyDrawer({
             {screen === "loading" && !error && (
               <div className="space-y-3" aria-busy>
                 <Skeleton className="h-5 w-2/3" />
-                <Skeleton className="h-11 w-full" />
-                <Skeleton className="h-11 w-full" />
+                <Skeleton className="h-12 w-full" />
+                <Skeleton className="h-12 w-full" />
               </div>
             )}
 
@@ -498,15 +553,29 @@ export function BuyDrawer({
               <IdentityStep
                 state={state}
                 googleBusy={googleBusy}
-                linkSent={linkSent}
+                sentTo={sentTo}
                 resendIn={resendIn}
                 onGoogle={openGoogle}
-                onRequestLink={requestLink}
+                onSend={sendCode}
+                onCode={verifyCode}
               />
             )}
 
             {screen === "checkout" && state && (
               <>
+                {(branchLabel || state.identity.verified) && (
+                  <div className="flex items-center justify-between gap-3 rounded-xl bg-muted/60 px-3 py-2 text-sm">
+                    <p className="flex min-w-0 items-center gap-2">
+                      <CheckCircle2Icon className="size-4 shrink-0 text-primary" style={{ color: accentColor }} />
+                      <span className="truncate">
+                        {[branchLabel, state.identity.verified ? state.identity.email : null].filter(Boolean).join(" · ")}
+                      </span>
+                    </p>
+                    <button type="button" onClick={() => void restart()} className="shrink-0 text-xs underline underline-offset-4">
+                      Change
+                    </button>
+                  </div>
+                )}
                 <TicketPicker state={state} qty={qty} onQty={(id, n) => void changeQty(id, n)} />
                 {state.identity.method === "NONE" && !state.identity.verified && (
                   <Field>
@@ -519,9 +588,10 @@ export function BuyDrawer({
                       value={contact}
                       onChange={(e) => setContact(e.target.value)}
                       placeholder="you@example.com"
+                      className="h-11"
                       required
                     />
-                    <FieldDescription>Your tickets and receipt are emailed here.</FieldDescription>
+                    <FieldDescription>Your tickets are shown here and emailed to this address.</FieldDescription>
                   </Field>
                 )}
                 {state.branding.customFields.length > 0 && (
@@ -541,20 +611,17 @@ export function BuyDrawer({
                   paying={paying}
                   cancelled={paymentCancelled}
                   onPay={() => void pay()}
-                  onSwitchPerson={() => void resetIdentity()}
+                  onSwitchPerson={() => void restart()}
                   accentColor={accentColor}
                 />
               </>
             )}
 
-            {screen === "done" && (
+            {screen === "done" && state && (
               <DoneStep
-                email={state?.identity.email ?? ""}
-                slug={slug}
-                orderId={orderId}
-                confirmed={confirmed}
+                state={state}
+                email={state.identity.email ?? contact}
                 onRetry={() => {
-                  setConfirmed(false);
                   setPaymentCancelled(false);
                   setScreen("checkout");
                 }}

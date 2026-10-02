@@ -1,179 +1,354 @@
+import type { Metadata } from "next";
+import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Logo } from "@/components/logo";
-import type { Metadata } from "next";
-import { getBranding } from "@/lib/branding";
-import { getDb } from "@/lib/db";
-import { getPublishedEventBySlug } from "@/lib/events";
+import { AlertTriangleIcon, ArrowUpRightIcon, FlaskConicalIcon, MapPinIcon, TicketIcon } from "lucide-react";
+import { BookingDock } from "@/components/features/event-page/booking-dock";
+import { BrandMark } from "@/components/patterns/brand-mark";
+import { Money } from "@/components/patterns/money";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { appUrl } from "@/lib/email";
+import { formatDateTime, formatINR } from "@/lib/format";
+import { initials } from "@/lib/nav";
+import { getPublicEvent, type PublicEvent, type PublicTicket } from "@/lib/public-event";
 import { verifyTestRun } from "@/lib/test-run";
-import type { Event, TicketType } from "@/lib/types";
-import { getActiveFlow } from "@/lib/flows";
-import { mediaUrl } from "@/lib/media";
-import { BuyDrawer } from "./buy-drawer";
 
 /**
- * The public event page.
+ * The public event page, in the spirit of lu.ma: a square cover and the host
+ * on the left; the title, a calendar tile, the place, registration and the
+ * story on the right; and a Book-now dock fixed to the bottom of the screen.
  *
- * A landing page plus one call to action. The buyer's answers, identity and cart
- * all live in the checkout session behind the drawer, which is why this route
- * reads UTM parameters (to attribute the QR code) but nothing else about the
- * buyer.
+ * A server component with no client-side data fetching. The only client code
+ * shipped with the page is the dock button; the booking sheet loads on intent.
+ * Cancelled, ended, sold-out and not-yet-on-sale events show their state and
+ * no dock.
  */
-export async function generateMetadata({
-  params,
-}: {
-  params: Promise<{ slug: string }>;
-}): Promise<Metadata> {
-  const { slug } = await params;
-  const data = await getPublishedEventBySlug(slug);
-  if (!data) return { title: "Event not found — Morbin" };
-  const { event } = data;
-  const branding = await getBranding(event._id!.toString());
-  // The banner doubles as the share image, so a link pasted into a chat shows
-  // the poster rather than a generic card.
-  const images = branding.bannerKey
-    ? [{ url: bannerUrl(branding.bannerKey), width: 1200, height: 630, alt: event.title }]
-    : undefined;
-  return {
-    title: `${event.title} — Morbin`,
-    description: event.description.slice(0, 150),
-    alternates: { canonical: `/event/${event.slug}` },
-    openGraph: {
-      title: event.title,
-      description: event.description.slice(0, 200),
-      url: `/event/${event.slug}`,
-      images,
-    },
-    twitter: {
-      card: images ? "summary_large_image" : "summary",
-      title: event.title,
-      description: event.description.slice(0, 200),
-      images: images?.map((i) => i.url),
-    },
-  };
+
+type SearchParams = Promise<Record<string, string | string[] | undefined>>;
+
+function first(v: string | string[] | undefined): string | undefined {
+  return Array.isArray(v) ? v[0] : v;
 }
 
-export default async function EventPage({
+async function load(slug: string, testToken: string | null) {
+  const test = verifyTestRun(testToken);
+  const event = await getPublicEvent(slug, { draftEventId: test?.eventId ?? null });
+  if (event && test && test.eventId !== event.id) return { event: null, test: null };
+  return { event, test };
+}
+
+export async function generateMetadata({
   params,
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
-}) {
-  const { slug } = await params;
-  const query = await searchParams;
-  // A builder test run may open a draft event; anyone else sees published ones.
+  searchParams: SearchParams;
+}): Promise<Metadata> {
+  const [{ slug }, query] = await Promise.all([params, searchParams]);
+  const { event } = await load(slug, first(query.test) ?? null);
+  if (!event) return { title: "Event not found — Morbin", robots: { index: false } };
+  const description = event.description.replace(/\s+/g, " ").slice(0, 160);
+  const images = event.bannerUrl ? [{ url: event.bannerUrl, width: 1200, height: 630, alt: event.title }] : undefined;
+  return {
+    title: `${event.title} — Morbin`,
+    description,
+    alternates: { canonical: `/event/${event.slug}` },
+    // Drafts (test runs) and cancelled events are never worth indexing.
+    robots: event.status === "PUBLISHED" ? undefined : { index: false, follow: false },
+    openGraph: { type: "website", title: event.title, description, url: `/event/${event.slug}`, images },
+    twitter: { card: images ? "summary_large_image" : "summary", title: event.title, description, images: images?.map((i) => i.url) },
+  };
+}
+
+/** schema.org Event, for search results. */
+function jsonLd(e: PublicEvent) {
+  const available = e.tickets.filter((t) => t.state === "AVAILABLE");
+  return {
+    "@context": "https://schema.org",
+    "@type": "Event",
+    name: e.title,
+    description: e.description.slice(0, 500),
+    startDate: e.startsAt,
+    endDate: e.endsAt,
+    eventStatus: e.state === "CANCELLED" ? "https://schema.org/EventCancelled" : "https://schema.org/EventScheduled",
+    eventAttendanceMode: "https://schema.org/OfflineEventAttendanceMode",
+    location: { "@type": "Place", name: e.venue, address: e.venue },
+    image: e.bannerUrl ? [appUrl(e.bannerUrl)] : undefined,
+    organizer: e.organizerName ? { "@type": "Organization", name: e.organizerName } : undefined,
+    offers: (available.length ? available : e.tickets).map((t) => ({
+      "@type": "Offer",
+      name: t.name,
+      price: (t.pricePaise / 100).toFixed(2),
+      priceCurrency: "INR",
+      availability: t.state === "AVAILABLE" ? "https://schema.org/InStock" : "https://schema.org/SoldOut",
+      url: appUrl(`/event/${e.slug}`),
+    })),
+  };
+}
+
+/** Parts of a date in the event's own timezone, for the calendar tile and lines. */
+function dateParts(iso: string, timeZone: string) {
+  const d = new Date(iso);
+  const part = (opts: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat("en-IN", { timeZone, ...opts }).format(d);
+  return {
+    month: part({ month: "short" }).toUpperCase(),
+    day: part({ day: "numeric" }),
+    long: part({ weekday: "long", day: "numeric", month: "long" }),
+    time: part({ hour: "numeric", minute: "2-digit" }),
+    sameDayAs: (other: string) =>
+      new Intl.DateTimeFormat("en-CA", { timeZone, dateStyle: "short" }).format(d) ===
+      new Intl.DateTimeFormat("en-CA", { timeZone, dateStyle: "short" }).format(new Date(other)),
+  };
+}
+
+const TICKET_STATE: Record<PublicTicket["state"], string | null> = {
+  AVAILABLE: null,
+  SOLD_OUT: "Sold out",
+  PAUSED: "Paused",
+  NOT_YET: "Not on sale yet",
+  CLOSED: "Sales closed",
+};
+
+export default async function EventPage({ params, searchParams }: { params: Promise<{ slug: string }>; searchParams: SearchParams }) {
+  const [{ slug }, query] = await Promise.all([params, searchParams]);
   const testToken = first(query.test) ?? null;
-  const test = verifyTestRun(testToken);
-  const data = (await getPublishedEventBySlug(slug)) ?? (test ? await draftForTest(slug, test.eventId) : null);
-  if (!data) notFound();
-  if (test && test.eventId !== data.event._id!.toString()) notFound();
-  const { event, ticketTypes } = data;
-  const eventId = event._id!.toString();
+  const { event, test } = await load(slug, testToken);
+  if (!event) notFound();
 
-  const when = new Date(event.startsAt).toLocaleString("en-IN", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
+  const b = event.branding;
+  const start = dateParts(event.startsAt, event.timezone);
+  const end = dateParts(event.endsAt, event.timezone);
+  const mapUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(event.venue)}`;
+  const bookable = event.state === "ON_SALE";
+  const price = event.fromPaise === null ? null : event.fromPaise === 0 ? "Free" : `From ${formatINR(event.fromPaise)}`;
+  // A JSON-LD payload must not be able to close its own <script> tag.
+  const ld = JSON.stringify(jsonLd(event)).replace(/</g, "\\u003c");
+  const [venueName, ...venueRest] = event.venue.split(",");
 
-  const [branding, flow] = await Promise.all([getBranding(eventId), getActiveFlow(eventId)]);
-
-  // The flow decides whether the landing page previews prices, so the two can
-  // never disagree — a "don't show prices" setting is a property of the flow.
-  const showPrices = branding.showTicketPreview && flow.version > 0;
-  const cheapest = ticketTypes.reduce<number | null>(
-    (min, t) => (min === null ? t.pricePaise : Math.min(min, t.pricePaise)),
-    null,
+  const host = event.organizerName && (
+    <section className="space-y-3">
+      <h2 className="border-b pb-2 text-sm font-medium text-muted-foreground">Hosted by</h2>
+      <div className="flex items-center gap-3">
+        <span
+          aria-hidden
+          className="flex size-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold text-white"
+          style={{ backgroundColor: b.accentColor }}
+        >
+          {initials(event.organizerName)}
+        </span>
+        <p className="font-medium">{event.organizerName}</p>
+      </div>
+    </section>
   );
 
   return (
-    <div className="min-h-dvh bg-[#060614] px-6 py-10 font-sans text-white antialiased">
-      <div className="mx-auto w-full max-w-2xl">
-        <Logo height={24} />
+    <div
+      className="min-h-dvh bg-background text-foreground"
+      style={{
+        // A soft wash of the event's colour behind the top of the page.
+        backgroundImage: `radial-gradient(70rem 32rem at 50% -8rem, color-mix(in oklch, ${b.accentColor} 22%, transparent), transparent 70%)`,
+      }}
+    >
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: ld }} />
+      <header className="mx-auto flex w-full max-w-5xl items-center justify-between px-4 py-4 sm:px-6">
+        <BrandMark />
+        <Link href={`/event/${event.slug}/tickets`} className="text-sm text-muted-foreground transition-colors hover:text-foreground">
+          My tickets
+        </Link>
+      </header>
 
-        {branding.bannerKey && (
-          // A plain <img>: the source is an R2 object we control, and going
-          // through the image optimizer would add a transform this app does not
-          // need for a single hero image.
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={bannerUrl(branding.bannerKey)}
-            alt=""
-            className="mt-6 w-full rounded-2xl border border-white/10 object-cover"
-          />
-        )}
-
-        {(branding.showVenue || branding.showDate) && (
-          <p className="mt-8 text-xs font-bold uppercase tracking-widest text-violet-300">
-            {[branding.showVenue ? event.venue : null, branding.showDate ? when : null]
-              .filter(Boolean)
-              .join(" · ")}
-          </p>
-        )}
-        <h1 className="mt-2 text-3xl font-bold tracking-tight sm:text-4xl">{event.title}</h1>
-        {branding.showDescription && (
-          <p className="mt-4 whitespace-pre-line text-sm leading-relaxed text-neutral-300">
-            {event.description}
-          </p>
-        )}
-
-        {showPrices && cheapest !== null && (
-          <p className="mt-4 text-sm text-neutral-400">
-            From ₹{(cheapest / 100).toFixed(0)}
-          </p>
-        )}
-
+      <main className={`mx-auto w-full max-w-5xl px-4 pt-2 sm:px-6 ${bookable ? "pb-32" : "pb-16"}`}>
         {test && (
-          <p className="mt-8 rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
-            Test run with your draft booking rules. Nothing is charged, no seats are held and no emails are sent.
-          </p>
+          <Alert className="mb-6">
+            <FlaskConicalIcon />
+            <AlertTitle>Test run</AlertTitle>
+            <AlertDescription>
+              Test run with your draft booking rules. Nothing is charged, no seats are held and no emails are sent.
+            </AlertDescription>
+          </Alert>
         )}
 
-        <div className="mt-8">
-          <BuyDrawer
-            testToken={test ? testToken : null}
-            eventId={eventId}
-            slug={event.slug}
-            title={event.title}
-            accentColor={branding.accentColor}
-            ctaLabel={branding.ctaLabel}
-            utm={{
-              source: first(query.utm_source),
-              medium: first(query.utm_medium),
-              campaign: first(query.utm_campaign),
-            }}
-            autoOpen={query.resume === "1"}
-          />
-        </div>
+        <div className="grid gap-8 md:grid-cols-[minmax(0,20rem)_minmax(0,1fr)] md:gap-12">
+          <aside className="space-y-8">
+            <div className="relative aspect-square overflow-hidden rounded-2xl bg-muted shadow-xl ring-1 ring-foreground/10">
+              {event.bannerUrl ? (
+                <Image src={event.bannerUrl} alt="" fill priority sizes="(min-width: 768px) 320px, 100vw" className="object-cover" />
+              ) : (
+                <div
+                  aria-hidden
+                  className="absolute inset-0"
+                  style={{ background: `linear-gradient(135deg, ${b.accentColor}, color-mix(in oklch, ${b.accentColor}, black 60%))` }}
+                />
+              )}
+            </div>
+            <div className="hidden md:block">{host}</div>
+          </aside>
 
-        <div className="mt-10 border-t border-white/10 pt-5 text-sm text-neutral-400">
-          <Link href={`/event/${event.slug}/tickets`} className="hover:text-white">
-            Already bought? Find your tickets
-          </Link>
-          <p className="mt-1 text-xs text-neutral-600">
-            Sign in with the email you booked with.
-          </p>
+          <div className="min-w-0 space-y-8">
+            <div className="space-y-5">
+              <h1 className="text-3xl leading-tight font-semibold tracking-tight text-balance sm:text-5xl">{event.title}</h1>
+
+              <div className="space-y-3">
+                {b.showDate && (
+                  <div className="flex items-center gap-3">
+                    <div className="flex size-11 shrink-0 flex-col overflow-hidden rounded-xl border bg-background/60 text-center" aria-hidden>
+                      <span className="bg-muted text-[9px] leading-4 font-semibold text-muted-foreground">{start.month}</span>
+                      <span className="text-base leading-6 font-semibold">{start.day}</span>
+                    </div>
+                    <div className="min-w-0">
+                      <p className="font-medium">
+                        <time dateTime={event.startsAt}>{start.long}</time>
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        {start.time} – {start.sameDayAs(event.endsAt) ? end.time : `${end.long}, ${end.time}`}
+                      </p>
+                    </div>
+                  </div>
+                )}
+                {b.showVenue && event.venue && (
+                  <div className="flex items-center gap-3">
+                    <div className="flex size-11 shrink-0 items-center justify-center rounded-xl border bg-background/60" aria-hidden>
+                      <MapPinIcon className="size-5 text-muted-foreground" />
+                    </div>
+                    <div className="min-w-0">
+                      <a
+                        href={mapUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="group inline-flex items-center gap-1 font-medium hover:underline hover:underline-offset-4"
+                      >
+                        {venueName}
+                        <ArrowUpRightIcon className="size-3.5 text-muted-foreground" />
+                      </a>
+                      {venueRest.length > 0 && <p className="truncate text-sm text-muted-foreground">{venueRest.join(",").trim()}</p>}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <RegistrationCard event={event} />
+
+            {b.showDescription && event.description && (
+              <section className="space-y-3">
+                <h2 className="border-b pb-2 text-sm font-medium text-muted-foreground">About event</h2>
+                {/* Plain text, rendered as text: nothing the organiser types is interpreted as markup. */}
+                <p className="leading-relaxed whitespace-pre-line">{event.description}</p>
+              </section>
+            )}
+
+            {b.showVenue && event.venue && (
+              <section className="space-y-3">
+                <h2 className="border-b pb-2 text-sm font-medium text-muted-foreground">Location</h2>
+                <p className="font-medium">{venueName}</p>
+                {venueRest.length > 0 && <p className="text-sm text-muted-foreground">{venueRest.join(",").trim()}</p>}
+                <a href={mapUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-sm underline underline-offset-4">
+                  Open in Google Maps <ArrowUpRightIcon className="size-3.5" />
+                </a>
+              </section>
+            )}
+
+            <div className="md:hidden">{host}</div>
+
+            <footer className="border-t pt-6 text-xs text-muted-foreground">
+              <Link href={`/event/${event.slug}/tickets`} className="hover:text-foreground">
+                Already booked? Find your tickets
+              </Link>
+              <span className="mx-2">·</span>
+              <Link href="/legal/privacy" className="hover:text-foreground">
+                Privacy
+              </Link>
+              <span className="mx-2">·</span>
+              Sold through Morbin
+            </footer>
+          </div>
         </div>
-      </div>
+      </main>
+
+      {bookable && (
+        <BookingDock
+          eventId={event.id}
+          slug={event.slug}
+          title={event.title}
+          accentColor={b.accentColor}
+          ctaLabel={b.ctaLabel}
+          detail={b.showTicketPreview ? (price && event.customerPaysFee && event.fromPaise ? `${price} + fee` : price) : null}
+          utm={{ source: first(query.utm_source), medium: first(query.utm_medium), campaign: first(query.utm_campaign) }}
+          autoOpen={query.resume === "1"}
+          testToken={test ? testToken : null}
+        />
+      )}
     </div>
   );
 }
 
-function first(v: string | string[] | undefined): string | undefined {
-  if (Array.isArray(v)) return v[0];
-  return v ?? undefined;
-}
-
-/** R2 objects are served from the public media domain. */
-function bannerUrl(key: string): string {
-  return mediaUrl(key);
-}
-
-/** For a valid test run only: the event by slug even while it's a draft. */
-async function draftForTest(slug: string, eventId: string): Promise<{ event: Event; ticketTypes: TicketType[] } | null> {
-  const db = await getDb();
-  const event = await db.collection<Event>("events").findOne({ slug, status: "DRAFT" });
-  if (!event?._id || event._id.toString() !== eventId) return null;
-  const ticketTypes = await db.collection<TicketType>("ticketTypes").find({ eventId }).sort({ pricePaise: 1 }).toArray();
-  return { event, ticketTypes };
+/** Lu.ma's "Registration" box: the state of sales, and the ticket options. */
+function RegistrationCard({ event }: { event: PublicEvent }) {
+  const b = event.branding;
+  const notice =
+    event.state === "ON_SALE"
+      ? null
+      : {
+          CANCELLED: {
+            title: "This event has been cancelled",
+            body: "Ticket holders are being refunded to their original payment method and will get an email.",
+          },
+          ENDED: { title: "This event has ended", body: "Thanks to everyone who came." },
+          SOLD_OUT: { title: "Sold out", body: "Every ticket has been booked." },
+          NOT_ON_SALE: {
+            title: "Not on sale yet",
+            body: event.salesOpenAt ? `Tickets go on sale ${formatDateTime(event.salesOpenAt, event.timezone)}.` : "Check back soon.",
+          },
+        }[event.state];
+  const showTickets = b.showTicketPreview && event.tickets.length > 0;
+  if (!notice && !showTickets) return null;
+  return (
+    <section className="overflow-hidden rounded-2xl border bg-card/70 shadow-sm backdrop-blur-sm" aria-labelledby="registration-heading">
+      <h2 id="registration-heading" className="border-b bg-muted/50 px-4 py-2 text-sm font-medium text-muted-foreground">
+        {event.state === "ON_SALE" ? "Registration" : "Registration closed"}
+      </h2>
+      <div className="space-y-4 p-4">
+        {notice ? (
+          <div className="flex gap-3">
+            {event.state === "CANCELLED" ? (
+              <AlertTriangleIcon className="mt-0.5 size-5 shrink-0 text-destructive" />
+            ) : (
+              <TicketIcon className="mt-0.5 size-5 shrink-0 text-muted-foreground" />
+            )}
+            <div>
+              <p className={`font-medium ${event.state === "CANCELLED" ? "text-destructive" : ""}`}>{notice.title}</p>
+              <p className="text-sm text-muted-foreground">{notice.body}</p>
+            </div>
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">Welcome! Pick a ticket below — booking takes under a minute.</p>
+        )}
+        {showTickets && (
+          <ul className="divide-y rounded-xl border bg-background/60">
+            {event.tickets.map((t) => (
+              <li key={t.id} className="flex items-start justify-between gap-4 px-3 py-2.5">
+                <div className="min-w-0">
+                  <p className={`text-sm font-medium ${t.state !== "AVAILABLE" ? "text-muted-foreground" : ""}`}>{t.name}</p>
+                  {t.description && <p className="text-xs text-muted-foreground">{t.description}</p>}
+                  {TICKET_STATE[t.state] && (
+                    <p className="text-xs text-muted-foreground">
+                      {t.state === "NOT_YET" && t.saleStartsAt
+                        ? `On sale ${formatDateTime(t.saleStartsAt, event.timezone)}`
+                        : TICKET_STATE[t.state]}
+                    </p>
+                  )}
+                </div>
+                <p className="shrink-0 text-right text-sm">
+                  {t.pricePaise === 0 ? "Free" : <Money paise={t.pricePaise} className="font-medium" />}
+                  {t.pricePaise > 0 && event.customerPaysFee && (
+                    <span className="block text-[11px] text-muted-foreground">+ convenience fee</span>
+                  )}
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </section>
+  );
 }

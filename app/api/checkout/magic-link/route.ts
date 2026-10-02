@@ -118,7 +118,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: GENERIC }, { status: 202 });
   }
 
-  const { raw } = await issueOtp(session.publicId, email);
+  const { raw, code } = await issueOtp(session.publicId, email);
 
   const db = await getDb();
   const event = await db
@@ -141,6 +141,7 @@ export async function POST(request: Request) {
       eventVenue: event?.venue ?? "",
       attendeeName: email.split("@")[0],
       ticketCode: link,
+      otpCode: code,
       qrSvg: null,
     },
   });

@@ -58,28 +58,31 @@ export function PaymentStep({
           </AlertDescription>
         </Alert>
       ) : (
-        <Button
-          size="lg"
-          className="w-full text-white"
-          style={{ backgroundColor: accentColor }}
-          onClick={onPay}
-          disabled={paying || !hasItems || state.offer.soldOutForIdentity}
-        >
-          {paying && <Spinner data-icon="inline-start" />}
-          {state.offer.soldOutForIdentity ? (
-            "Not available for you"
-          ) : paying ? (
-            "Opening payment…"
-          ) : !hasItems ? (
-            "Select tickets"
-          ) : total === 0 ? (
-            "Get my ticket"
-          ) : (
-            <>
-              {cancelled ? "Pay again" : "Continue to payment"} · <Money paise={total} />
-            </>
-          )}
-        </Button>
+        // Pinned to the bottom of the sheet: the next tap is always in reach.
+        <div className="sticky bottom-0 -mx-4 -mb-4 border-t bg-popover/95 p-4 backdrop-blur supports-[backdrop-filter]:bg-popover/80">
+          <Button
+            size="lg"
+            className="h-12 w-full text-base text-white"
+            style={{ backgroundColor: accentColor }}
+            onClick={onPay}
+            disabled={paying || !hasItems || state.offer.soldOutForIdentity}
+          >
+            {paying && <Spinner data-icon="inline-start" />}
+            {state.offer.soldOutForIdentity ? (
+              "Not available for you"
+            ) : paying ? (
+              "Opening payment…"
+            ) : !hasItems ? (
+              "Select tickets"
+            ) : total === 0 ? (
+              "Get my ticket"
+            ) : (
+              <>
+                {cancelled ? "Pay again" : "Continue to payment"} · <Money paise={total} />
+              </>
+            )}
+          </Button>
+        </div>
       )}
     </div>
   );

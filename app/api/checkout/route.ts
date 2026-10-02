@@ -142,7 +142,15 @@ async function describe(session: NonNullable<Awaited<ReturnType<typeof getChecko
 
   return {
     gone: false as const,
-    event: { id: session.eventId, slug: event.slug, title: event.title, venue: event.venue },
+    event: {
+      id: session.eventId,
+      slug: event.slug,
+      title: event.title,
+      venue: event.venue,
+      startsAt: event.startsAt.toISOString(),
+      endsAt: event.endsAt.toISOString(),
+      timezone: event.timezone,
+    },
     pricing: {
       feeBps: policy.feeBps,
       gstBps: policy.gstBps,

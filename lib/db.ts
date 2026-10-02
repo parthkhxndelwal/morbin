@@ -74,7 +74,7 @@ export async function ensureIndexes(): Promise<void> {
     db.collection("events").createIndex({ organizationId: 1, slug: 1 }, { unique: true }),
     // Public event pages are looked up by slug alone, so the slug is globally
     // unique. This index does double duty: it enforces that, and it is the only
-    // index that can serve `getPublishedEventBySlug` — without it every event
+    // index that can serve the public event page's slug lookup — without it every event
     // page view is a collection scan.
     db.collection("events").createIndex({ slug: 1 }, { unique: true }),
     db.collection("ticketTypes").createIndex({ eventId: 1 }),

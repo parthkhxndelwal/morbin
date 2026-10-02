@@ -20,40 +20,6 @@ export async function getEventById(id: string): Promise<Event | null> {
 }
 
 /**
- * The public event page, by slug.
- *
- * Wrapped in React `cache()` because the page calls it twice per render — once
- * from `generateMetadata` and once from the component body — and each call was
- * a separate Mongo round trip. `cache()` dedupes to one read per request.
- *
- * The memoisation is scoped to a single request, which is what we want here: it
- * is a read-only public page, and nothing in one render mutates an event. Code
- * that writes an event and then needs to re-read it must not go through this
- * function.
- *
- * Slugs are globally unique (unique index on `events.slug`), so an unqualified
- * `{ slug }` lookup is unambiguous. It is also the only index that can serve
- * this query, so an event page view costs one index hit rather than a scan.
- */
-export const getPublishedEventBySlug = cache(
-  async (slug: string): Promise<{ event: Event; ticketTypes: TicketType[] } | null> => {
-    const db = await getDb();
-    const event = await db.collection<Event>("events").findOne({ slug, status: "PUBLISHED" });
-    if (!event || !event._id) return null;
-    const now = new Date();
-    // A finished event is indistinguishable from a missing one to a visitor, so
-    // both 404. Callers that need to tell them apart use getEventById.
-    if (event.endsAt < now) return null;
-    const ticketTypes = await db
-      .collection<TicketType>("ticketTypes")
-      .find({ eventId: event._id.toString() })
-      .sort({ pricePaise: 1 })
-      .toArray();
-    return { event, ticketTypes };
-  },
-);
-
-/**
  * Find an unused slug, derived from `desired` and disambiguated on collision.
  *
  * Collisions are checked against the whole collection, not just one

@@ -26,7 +26,7 @@ const TYPES: Record<string, { ext: string; magic?: number[] }> = {
 
 function root(): string {
   // Runtime data directory, never part of the build: keep it out of output tracing.
-  return path.resolve(/*turbopackIgnore: true*/ process.env.DOCUMENTS_DIR ?? path.join(process.cwd(), "data", "documents"));
+  return path.resolve(/*turbopackIgnore: true*/ process.env.DOCUMENTS_DIR ?? path.join(/*turbopackIgnore: true*/ process.cwd(), "data", "documents"));
 }
 
 /** Does the content really have this type? (Declared types are not trusted.) */

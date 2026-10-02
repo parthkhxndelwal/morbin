@@ -1,53 +1,138 @@
 "use client";
 
 import Link from "next/link";
-import { CheckCircle2Icon, Clock3Icon } from "lucide-react";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { CalendarPlusIcon, CheckIcon, Clock3Icon } from "lucide-react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import type { CheckoutState } from "./types";
 
-/** After paying (or a free order): confirmation, or waiting for Razorpay's webhook. */
+interface BookedTicket {
+  code: string;
+  attendeeName: string;
+  type: string;
+  qrSvg: string | null;
+}
+
+/** An .ics file for the event, built in the browser (nothing is sent anywhere). */
+function calendarHref(event: CheckoutState["event"]): string {
+  const stamp = (iso: string) => iso.replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+  const esc = (s: string) => s.replace(/[\\,;]/g, (c) => `\\${c}`).replace(/\n/g, "\\n");
+  const url = `${window.location.origin}/event/${event.slug}`;
+  const ics = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//Morbin//Tickets//EN",
+    "BEGIN:VEVENT",
+    `UID:${event.id}@morbin`,
+    `DTSTAMP:${stamp(new Date().toISOString())}`,
+    `DTSTART:${stamp(event.startsAt)}`,
+    `DTEND:${stamp(event.endsAt)}`,
+    `SUMMARY:${esc(event.title)}`,
+    `LOCATION:${esc(event.venue)}`,
+    `URL:${url}`,
+    "END:VEVENT",
+    "END:VCALENDAR",
+  ].join("\r\n");
+  return `data:text/calendar;charset=utf-8,${encodeURIComponent(ics)}`;
+}
+
+/**
+ * The end of the journey: the ticket itself, right here — no inbox, no sign-in.
+ * Polls until the order is paid (a free order already is; a paid one waits for
+ * Razorpay's webhook), then shows each ticket's QR.
+ */
 export function DoneStep({
+  state,
   email,
-  slug,
-  orderId,
-  confirmed,
   onRetry,
 }: {
+  state: CheckoutState;
   email: string;
-  slug: string;
-  orderId: string | null;
-  /** A free order, or the webhook has marked it PAID. */
-  confirmed: boolean;
   onRetry: () => void;
 }) {
+  const [tickets, setTickets] = useState<BookedTicket[] | null>(null);
+  const [waiting, setWaiting] = useState(true);
+
+  useEffect(() => {
+    let stop = false;
+    (async () => {
+      for (let i = 0; i < 60 && !stop; i++) {
+        const res = await fetch("/api/checkout/tickets", { cache: "no-store" }).catch(() => null);
+        const body = res?.ok ? await res.json() : null;
+        if (body?.status === "PAID" && body.tickets?.length) {
+          if (!stop) {
+            setTickets(body.tickets);
+            setWaiting(false);
+          }
+          return;
+        }
+        await new Promise((r) => setTimeout(r, i < 5 ? 1000 : 3000));
+      }
+      if (!stop) setWaiting(false);
+    })();
+    return () => {
+      stop = true;
+    };
+  }, []);
+
+  const confirmed = !!tickets;
   return (
-    <div className="space-y-4">
+    <div className="space-y-5 text-center">
+      <div className="space-y-2">
+        <div
+          className={`mx-auto flex size-14 items-center justify-center rounded-full ${confirmed ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}
+        >
+          {confirmed ? <CheckIcon className="size-7" /> : <Clock3Icon className="size-7" />}
+        </div>
+        <h3 className="text-xl font-semibold">{confirmed ? "You're in!" : "Confirming your payment…"}</h3>
+        <p className="text-sm text-muted-foreground">
+          {confirmed
+            ? `Your ticket${tickets.length > 1 ? "s are" : " is"} below, and on the way to ${email || "your email"} as a PDF.`
+            : "This takes a few seconds once Razorpay confirms. Your ticket will appear here."}
+        </p>
+      </div>
+
       {confirmed ? (
-        <Alert>
-          <CheckCircle2Icon />
-          <AlertTitle>You&apos;re booked</AlertTitle>
-          <AlertDescription>
-            Your ticket{email ? ` is on its way to ${email}` : " is on its way"}.
-            {orderId ? ` Order ${orderId.slice(-8).toUpperCase()}.` : ""}
-          </AlertDescription>
-        </Alert>
+        <ul className="space-y-3">
+          {tickets.map((t) => (
+            <li key={t.code} className="rounded-xl border bg-card p-4 text-left">
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="truncate font-medium">{t.attendeeName}</p>
+                  <p className="text-xs text-muted-foreground">{t.type}</p>
+                </div>
+                <p className="font-mono text-xs tracking-widest">{t.code}</p>
+              </div>
+              {t.qrSvg && (
+                <div
+                  className="mx-auto mt-3 w-full max-w-44 rounded-lg bg-white p-2 [&_svg]:h-auto [&_svg]:w-full"
+                  role="img"
+                  aria-label={`QR code for ticket ${t.code}`}
+                  // Server-generated by `qrcode` from our own signed payload.
+                  dangerouslySetInnerHTML={{ __html: t.qrSvg }}
+                />
+              )}
+            </li>
+          ))}
+        </ul>
+      ) : waiting ? (
+        <Skeleton className="mx-auto h-44 w-44 rounded-xl" />
       ) : (
-        <Alert>
-          <Clock3Icon />
-          <AlertTitle>Waiting for your payment…</AlertTitle>
-          <AlertDescription>
-            This updates the moment Razorpay confirms. Your ticket goes to {email || "your email"} either way.
-          </AlertDescription>
-        </Alert>
-      )}
-      <Button variant="outline" className="w-full" nativeButton={false} render={<Link href={`/event/${slug}/tickets`} />}>
-        View my tickets
-      </Button>
-      {!confirmed && (
-        <button type="button" onClick={onRetry} className="block w-full text-center text-xs text-muted-foreground underline underline-offset-4">
-          Not working? Try paying again
+        <button type="button" onClick={onRetry} className="text-xs text-muted-foreground underline underline-offset-4">
+          Taking too long? Try paying again
         </button>
       )}
+
+      <div className="grid gap-2 sm:grid-cols-2">
+        <Button variant="outline" nativeButton={false} render={<a href={calendarHref(state.event)} download="event.ics" />}>
+          <CalendarPlusIcon data-icon="inline-start" />
+          Add to calendar
+        </Button>
+        <Button variant="outline" nativeButton={false} render={<Link href={`/event/${state.event.slug}/tickets`} />}>
+          All my tickets
+        </Button>
+      </div>
     </div>
   );
 }

@@ -143,18 +143,26 @@ function magicLinkHtml({
   eventTitle,
   eventVenue,
   link,
+  code,
 }: {
   attendeeName: string;
   eventTitle: string;
   eventVenue: string;
   link: string;
+  code: string | null;
 }): string {
   return `<div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#111">
-    <h2 style="margin:0 0 4px">Confirm your email to continue</h2>
+    <h2 style="margin:0 0 4px">Your code for ${eventTitle}</h2>
     <p style="margin:0 0 16px;color:#555">${eventVenue || eventTitle}</p>
     <p>Hi ${attendeeName},</p>
-    <p>Tap the button below to confirm this address and pick up your tickets.
-       This link works once and expires in 15 minutes.</p>
+    ${
+      code
+        ? `<p>Enter this code where you're booking:</p>
+           <p style="font-size:32px;font-weight:bold;letter-spacing:8px;margin:12px 0;font-family:monospace">${code}</p>
+           <p>Or tap the button to confirm on this device. Both work once and expire in 15 minutes.</p>`
+        : `<p>Tap the button below to confirm this address and pick up your tickets.
+           This link works once and expires in 15 minutes.</p>`
+    }
     ${emailButton(link, "Confirm my email")}
     <p style="color:#777;font-size:12px;word-break:break-all">
       If the button does not work, paste this into your browser:<br>${link}
@@ -364,12 +372,15 @@ export async function flushEmailQueue(limit = 20): Promise<{ sent: number; faile
         });
       } else if (job.kind === "FLOW_MAGIC_LINK") {
         // `ticketCode` carries the link for this kind.
-        subject = `Confirm your email to book — ${meta.eventTitle ?? "Morbin event"}`;
+        subject = meta.otpCode
+          ? `${meta.otpCode} is your code for ${meta.eventTitle ?? "Morbin"}`
+          : `Confirm your email to book — ${meta.eventTitle ?? "Morbin event"}`;
         html = magicLinkHtml({
           attendeeName,
           eventTitle,
           eventVenue: esc(meta.eventVenue ?? ""),
           link: meta.ticketCode ?? "",
+          code: meta.otpCode && /^\d{6}$/.test(meta.otpCode) ? meta.otpCode : null,
         });
       } else if (job.kind === "EMAIL_VERIFY") {
         subject = "Confirm your Morbin email address";
@@ -473,8 +484,9 @@ export async function flushEmailQueue(limit = 20): Promise<{ sent: number; faile
             sentAt: new Date(),
             providerMessageId: r.dev ? "dev-skip" : (r.id ?? null),
             "meta.qrSvg": null,
-            // A join link is a credential; once delivered it has no reason to stay here.
+            // A join link or sign-in code is a credential; once delivered it has no reason to stay here.
             "meta.link": null,
+            "meta.otpCode": null,
           },
           $inc: { attempts: 1 },
         },

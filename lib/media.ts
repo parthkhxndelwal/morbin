@@ -46,7 +46,7 @@ export { MAX_BYTES, ALLOWED };
 
 function mediaRoot(): string {
   // Runtime data directory, never part of the build: keep it out of output tracing.
-  return path.resolve(/*turbopackIgnore: true*/ process.env.MEDIA_DIR ?? path.join(process.cwd(), "data", "media"));
+  return path.resolve(/*turbopackIgnore: true*/ process.env.MEDIA_DIR ?? path.join(/*turbopackIgnore: true*/ process.cwd(), "data", "media"));
 }
 
 /**
