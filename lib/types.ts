@@ -346,7 +346,9 @@ export type EmailKind =
   /** An account Morbin created for someone (e.g. a new organisation owner): choose a password. */
   | "ACCOUNT_SETUP"
   /** Organisation applications: received, more info needed, approved, rejected. */
-  | "APPLICATION";
+  | "APPLICATION"
+  /** A Morbin admin writing to the customer about a refund case. */
+  | "REFUND_MESSAGE";
 
 export interface EmailRecord {
   _id?: ObjectId;
@@ -819,5 +821,18 @@ export interface Notification {
   body: string;
   link: string | null;
   readAt: Date | null;
+  createdAt: Date;
+}
+
+/** A message on a refund case: Morbin admin → customer (by email). */
+export interface RefundMessage {
+  _id?: ObjectId;
+  refundCaseId: string;
+  organizationId: string;
+  authorId: string;
+  authorRole: "ADMIN";
+  message: string;
+  /** The email delivery carrying it, for its status. */
+  emailId: string | null;
   createdAt: Date;
 }
