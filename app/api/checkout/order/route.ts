@@ -12,6 +12,8 @@ import { getBranding } from "@/lib/branding";
 import { getDb, toObjectId } from "@/lib/db";
 import { getTicketTypes } from "@/lib/events";
 import { getActiveFlow, resolveOffer } from "@/lib/flows";
+import { lookupIdentityStep, lookupSteps } from "@/lib/flow-rules";
+import { matchLookup } from "@/lib/lookups";
 import { flushEmailQueue } from "@/lib/email";
 import { createHeldOrder, releaseOrder } from "@/lib/orders";
 import { getPlatformSettings, pricingPolicyFor } from "@/lib/platform-settings";
@@ -168,10 +170,37 @@ export async function POST() {
     orderItems.push({ ticketTypeId, name: t.name, quantity, unitPricePaise: t.pricePaise });
   }
 
+  // Lookup answers are re-checked here, not trusted from when they were
+  // typed: the row may have been deleted, or claimed by someone else since.
+  const lookupKeys: NonNullable<Order["lookupKeys"]> = [];
+  for (const step of lookupSteps(flow)) {
+    const stored = session.lookups?.[step.id];
+    const value = session.answers[step.id];
+    if (!stored || !value) {
+      if (step.required === false) continue;
+      return NextResponse.json({ error: "Please answer all questions first" }, { status: 400 });
+    }
+    const again = await matchLookup(event.organizationId, session.eventId, step.lookup!, value);
+    if (!again.ok || again.key !== stored.key || again.derivedEmail !== stored.derivedEmail) {
+      const error = again.ok || again.reason !== "taken" ? "Your ID could no longer be confirmed. Please reopen checkout." : "This ID already has a ticket.";
+      return NextResponse.json({ error }, { status: 409 });
+    }
+    lookupKeys.push({ stepId: step.id, datasetId: step.lookup!.datasetId, key: again.key, claim: step.lookup!.oneTicketPerRow });
+  }
+
   // Name and contact come from the verified identity, never from a form.
   const buyerEmail = session.identity.email;
   if (!buyerEmail) {
     return NextResponse.json({ error: "No confirmed email for this order" }, { status: 403 });
+  }
+  // With an email-from-template lookup, the ticket goes to the derived address
+  // and nowhere else.
+  const identityStep = lookupIdentityStep(flow);
+  if (identityStep) {
+    const derived = session.lookups?.[identityStep.id]?.derivedEmail;
+    if (!session.identity.verifiedAt || !derived || buyerEmail !== derived) {
+      return NextResponse.json({ error: "Please confirm your email to continue" }, { status: 403 });
+    }
   }
   // A field whose id mentions "name" is treated as the attendee's name for the
   // ticket; anything else is recorded but not used to address a ticket.
@@ -213,6 +242,7 @@ export async function POST() {
     flowBranch: session.branch?.value ?? null,
     identityMethod: session.identity.via,
     utm: session.utm,
+    lookupKeys: lookupKeys.length ? lookupKeys : null,
     // Labelled from the organizer's own field list, so the orders export reads
     // "Full name" rather than the internal `cf_name` id. An id the branding no
     // longer lists (a field since removed) still records its value.

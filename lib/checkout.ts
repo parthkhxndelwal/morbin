@@ -141,6 +141,45 @@ export async function answerStep(
   return getCheckoutSession(publicId);
 }
 
+/**
+ * Record a matched lookup answer. If the derived address differs from an
+ * already verified one, the verification is dropped: the identity must be the
+ * one the dataset row implies.
+ */
+export async function answerLookup(
+  publicId: string,
+  stepId: string,
+  value: string,
+  match: { datasetId: string; key: string; derivedEmail: string | null },
+): Promise<CheckoutSession | null> {
+  const db = await getDb();
+  const session = await getCheckoutSession(publicId);
+  if (!session) return null;
+  const set: Record<string, unknown> = {
+    [`answers.${stepId}`]: value,
+    [`lookups.${stepId}`]: match,
+    updatedAt: new Date(),
+  };
+  if (match.derivedEmail && session.identity.email && session.identity.email !== match.derivedEmail) {
+    Object.assign(set, {
+      "identity.email": null,
+      "identity.verifiedAt": null,
+      "identity.via": null,
+      status: "IN_PROGRESS",
+    });
+  }
+  await db
+    .collection<CheckoutSession>("checkoutSessions")
+    .updateOne({ publicId, status: { $in: ["IN_PROGRESS", "IDENTITY_VERIFIED"] } }, { $set: set });
+  return getCheckoutSession(publicId);
+}
+
+/** The address a lookup derived for this session, if its flow verifies one. */
+export function derivedEmailOf(session: Pick<CheckoutSession, "lookups">, stepId: string | null): string | null {
+  if (!stepId) return null;
+  return session.lookups?.[stepId]?.derivedEmail ?? null;
+}
+
 export async function saveCustomFields(
   publicId: string,
   fields: Record<string, string>,

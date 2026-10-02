@@ -18,7 +18,9 @@
     "check:money": "tsx --tsconfig scripts/tsconfig.checks.json --env-file=.env.local scripts/check-money.mts",
     "seed:dev-owner": "node --experimental-strip-types --env-file=.env.local scripts/seed-dev-owner.ts",
     "check:invoice": "tsx lib/invoice-rules.check.mts",
-    "check:datasets": "node --experimental-strip-types lib/dataset-rules.check.mts"
+    "check:datasets": "node --experimental-strip-types lib/dataset-rules.check.mts",
+    "check:templates": "node --experimental-strip-types lib/template-rules.check.mts",
+    "check:lookups": "tsx --tsconfig scripts/tsconfig.checks.json --env-file=.env.local scripts/check-lookups.mts"
   },
   "dependencies": {
     "@auth/mongodb-adapter": "^3.11.3",

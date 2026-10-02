@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getActiveFlow, getFlowDraft, publishFlow, saveFlowDraft } from "@/lib/flows";
 import { eventApiAccess } from "@/lib/event-access";
+import { lookupProblems } from "@/lib/lookups";
 import { can } from "@/lib/permissions";
 import { recordSupportChange, supportNeedsApproval } from "@/lib/support";
 import type { FlowStep } from "@/lib/types";
@@ -35,13 +36,23 @@ const optionSchema = z.object({
   showFieldIds: z.array(z.string().max(60)).max(50).nullish(),
 });
 
+const lookupSchema = z.object({
+  datasetId: z.string().min(1).max(60),
+  matchColumn: z.string().min(1).max(60),
+  inputHint: z.string().max(80).nullish(),
+  emailTemplate: z.string().max(200).nullish(),
+  identityMethod: z.enum(["EMAIL_OTP"]).nullish(),
+  oneTicketPerRow: z.boolean(),
+});
+
 const stepSchema = z.object({
   id: z.string().min(1).max(60),
-  kind: z.enum(["SINGLE_CHOICE", "IDENTITY", "QUANTITY", "INFO"]),
+  kind: z.enum(["SINGLE_CHOICE", "IDENTITY", "QUANTITY", "INFO", "LOOKUP"]),
   title: z.string().min(1).max(160),
   description: z.string().max(400).nullish(),
   required: z.boolean().optional(),
   options: z.array(optionSchema).max(20).nullish(),
+  lookup: lookupSchema.nullish(),
 });
 
 const bodySchema = z.object({
@@ -55,6 +66,12 @@ function validate(flow: { steps: FlowStep[] }): string | null {
   for (const s of flow.steps) {
     if (ids.has(s.id)) return `Duplicate step id "${s.id}".`;
     ids.add(s.id);
+  }
+  for (const s of flow.steps) {
+    if (s.kind === "LOOKUP" && !s.lookup) return `"${s.title}" needs a dataset to check against.`;
+  }
+  if (flow.steps.filter((s) => s.kind === "LOOKUP" && s.lookup?.identityMethod === "EMAIL_OTP").length > 1) {
+    return "Only one ID question can decide which email is confirmed.";
   }
   const values = new Set<string>();
   for (const s of flow.steps) {
@@ -110,7 +127,8 @@ export async function PUT(
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid flow" }, { status: 400 });
   }
-  const problem = validate(parsed.data);
+  const problem =
+    validate(parsed.data) ?? (await lookupProblems(access.org._id.toString(), parsed.data.steps as FlowStep[]));
   if (problem) return NextResponse.json({ error: problem }, { status: 400 });
 
   const eventId = access.event._id.toString();

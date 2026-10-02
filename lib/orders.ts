@@ -2,6 +2,7 @@ import { ObjectId, type ClientSession, type Db } from "mongodb";
 import { getDb, toObjectId } from "@/lib/db";
 import { insertTicketsOnce, queueTicketEmails } from "@/lib/fulfillment";
 import { appendLedger, saleEntries } from "@/lib/ledger";
+import { insertClaims, releaseClaims } from "@/lib/lookups";
 import { TxAbort, withTransaction } from "@/lib/tx";
 import type { Event, Order, Ticket } from "@/lib/types";
 
@@ -53,6 +54,7 @@ export async function createHeldOrder(order: Order): Promise<{ order: Order; tic
   const free = (order.pricing?.orderTotalPaise ?? order.totalPaise) === 0;
   const result = await withTransaction(async (session, db) => {
     await adjustSeats(db, session, order.items, 1);
+    await insertClaims(db, session, order);
     const doc: Order = free ? { ...order, status: "PAID", paidAt: new Date() } : order;
     await db.collection<Order>("orders").insertOne(doc, { session });
     const tickets = free ? await insertTicketsOnce(db, session, doc) : [];
@@ -80,6 +82,7 @@ export async function releaseOrder(orderId: ObjectId, to: "EXPIRED" | "FAILED"):
       .findOneAndUpdate({ _id: orderId, status: "CREATED" }, { $set: { status: to } }, { session });
     if (!order) return false;
     await adjustSeats(db, session, order.items, -1);
+    await releaseClaims(db, session, orderId.toString());
     return true;
   });
 }

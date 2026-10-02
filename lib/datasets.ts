@@ -121,6 +121,20 @@ export async function getDataset(orgId: string, id: string): Promise<DatasetSumm
   }
 }
 
+/** Datasets with their first row, for the booking-rules builder's live template example. */
+export async function datasetsForBuilder(orgId: string): Promise<(DatasetSummary & { sample: Record<string, string> | null })[]> {
+  const db = await getDb();
+  const datasets = await listDatasets(orgId);
+  return Promise.all(
+    datasets.map(async (d) => {
+      const row = await db
+        .collection<DatasetRow>("datasetRows")
+        .findOne({ datasetId: d.id }, { sort: { keyNormalised: 1 }, projection: { values: 1 } });
+      return { ...d, sample: row?.values ?? null };
+    }),
+  );
+}
+
 /** One page of rows, optionally filtered by a key prefix. Server-side: never all rows. */
 export async function listRows(orgId: string, datasetId: string, opts: { q?: string; page?: number }): Promise<RowsPage> {
   const dataset = await findDataset(orgId, datasetId);
@@ -150,14 +164,14 @@ export async function listRows(orgId: string, datasetId: string, opts: { q?: str
 
 /**
  * Booking questions that reference a dataset, as "event title" strings. A
- * dataset in use can't be deleted. Lookup questions (the next phase) store
- * `datasetId` on flow steps; until then this finds nothing.
+ * dataset in use can't be deleted. Lookup questions store it as
+ * `steps.lookup.datasetId`.
  */
 export async function datasetReferences(orgId: string, datasetId: string): Promise<string[]> {
   const db = await getDb();
   const flows = await db
     .collection<{ eventId: string }>("checkoutFlows")
-    .find({ "steps.datasetId": datasetId, status: { $in: ["DRAFT", "PUBLISHED"] } }, { projection: { eventId: 1 } })
+    .find({ "steps.lookup.datasetId": datasetId, status: { $in: ["DRAFT", "PUBLISHED"] } }, { projection: { eventId: 1 } })
     .toArray();
   if (flows.length === 0) return [];
   const ids = [...new Set(flows.map((f) => f.eventId))].map((id) => toObjectId(id)).filter((x): x is ObjectId => !!x);

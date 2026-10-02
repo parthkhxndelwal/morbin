@@ -34,6 +34,7 @@ export function buildTickets(order: Order): Ticket[] {
         refundCaseId: null,
         // Denormalised: the per-audience cap counts against these.
         flowBranch: order.flowBranch ?? null,
+        lookupKey: order.lookupKeys?.[0]?.key ?? null,
         flowVersion: order.flowVersion ?? null,
       });
     }
