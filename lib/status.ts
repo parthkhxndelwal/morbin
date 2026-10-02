@@ -76,6 +76,12 @@ export const STATUS = {
     REJECTED: { label: "Rejected", tone: "danger" },
     CANCELLED: { label: "Withdrawn", tone: "neutral" },
   },
+  dataRequest: {
+    UNVERIFIED: { label: "Unconfirmed", tone: "neutral", description: "The requester hasn't opened the email link." },
+    OPEN: { label: "Open", tone: "warning", description: "Confirmed; answer before the deadline." },
+    DONE: { label: "Done", tone: "success" },
+    REJECTED: { label: "Declined", tone: "neutral" },
+  },
   member: {
     OWNER: { label: "Owner", tone: "info" },
     MEMBER: { label: "Staff", tone: "neutral" },

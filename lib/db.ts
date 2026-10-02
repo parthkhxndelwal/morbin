@@ -143,6 +143,18 @@ export async function ensureIndexes(): Promise<void> {
     // One ticket per dataset row per event (lookup questions); see lib/lookups.
     db.collection("datasetClaims").createIndex({ datasetId: 1, key: 1, eventId: 1 }, { unique: true }),
     db.collection("datasetClaims").createIndex({ orderId: 1 }),
+    // Data requests (DPDP): find everything held for one address, and the queue.
+    db.collection("orders").createIndex({ buyerEmail: 1 }),
+    db.collection("orders").createIndex({ "attendees.email": 1 }),
+    db.collection("checkoutSessions").createIndex({ "identity.email": 1 }),
+    db.collection("emailDeliveries").createIndex({ recipient: 1 }),
+    db.collection("refundCases").createIndex({ "customer.email": 1 }),
+    db.collection("dataRequests").createIndex({ status: 1, dueAt: 1 }),
+    db.collection("dataRequests").createIndex({ tokenHash: 1 }, { unique: true, partialFilterExpression: { tokenHash: { $type: "string" } } }),
+    db.collection("dataRequests").createIndex(
+      { downloadTokenHash: 1 },
+      { unique: true, partialFilterExpression: { downloadTokenHash: { $type: "string" } } },
+    ),
     db.collection("rateLimits").createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
     db.collection("invoices").createIndex({ number: 1 }, { unique: true }),
     db.collection("invoices").createIndex({ orderId: 1, kind: 1 }, { unique: true }),
