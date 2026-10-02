@@ -8,15 +8,12 @@ import { can } from "@/lib/permissions";
 import type { TicketType } from "@/lib/types";
 import { FlowBuilder } from "./builder";
 
-export const metadata = { title: "Booking flow" };
+export const metadata = { title: "Booking rules" };
 
 /**
- * The checkout flow builder.
- *
- * Reads as a preview of the buyer's journey, because that is what it is: the
- * panel down the side calls the very same `resolveOffer` the drawer calls, so
- * what an organizer sees here is what a buyer will be offered. No second
- * implementation of the rules exists to drift out of sync.
+ * Booking rules: who can book this event and what each group may buy. The
+ * preview beside the editor runs the same `resolveOffer` the checkout does, so
+ * what the organiser sees is what a buyer is offered.
  */
 export default async function FlowBuilderPage({ params }: { params: Promise<{ id: string }> }) {
   const { org, role } = await requireOrgSession();
@@ -26,7 +23,7 @@ export default async function FlowBuilderPage({ params }: { params: Promise<{ id
   const eventId = event._id!.toString();
 
   if (!can(role, "manageEvents")) {
-    return <NoAccessState description="Only the organisation owner can change the booking flow." />;
+    return <NoAccessState description="Only the organisation owner can change who can book." />;
   }
 
   const [ticketTypes, branding, published, draft] = await Promise.all([
@@ -45,6 +42,11 @@ export default async function FlowBuilderPage({ params }: { params: Promise<{ id
         pricePaise: t.pricePaise,
         capacity: t.capacity,
         soldCount: t.soldCount,
+        status: t.status ?? null,
+        saleStartsAt: t.saleStartsAt ? new Date(t.saleStartsAt).toISOString() : null,
+        saleEndsAt: t.saleEndsAt ? new Date(t.saleEndsAt).toISOString() : null,
+        defaultMaxPerOrder: t.defaultMaxPerOrder ?? null,
+        audienceOptionIds: t.audienceOptionIds ?? null,
       }))}
       customFields={branding.customFields.map((f) => ({
         id: f.id,

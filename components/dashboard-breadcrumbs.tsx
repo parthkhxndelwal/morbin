@@ -19,7 +19,7 @@ const SEGMENTS: Record<string, string> = {
   admin: "Admin",
   events: "Events",
   scan: "Check-in",
-  flow: "Booking flow",
+  flow: "Booking rules",
   appearance: "Appearance",
   insights: "Insights",
   orders: "Orders",

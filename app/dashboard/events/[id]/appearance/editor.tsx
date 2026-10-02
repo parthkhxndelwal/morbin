@@ -256,7 +256,7 @@ export function AppearanceEditor({
           <CardHeader>
             <CardTitle>Ask at checkout</CardTitle>
             <CardDescription>
-              Shown inside the booking drawer, after sign-in. The booking flow can then choose which
+              Shown inside the booking drawer, after sign-in. Booking rules can then choose which
               of these each audience is asked for.
             </CardDescription>
             <CardAction>

@@ -205,9 +205,10 @@ export function resolveOffer(input: ResolveOfferInput): Offer {
   const missingRequiredSteps = flow.steps
     .filter((s) => s.required)
     .filter((s) => {
-      // IDENTITY and QUANTITY are not questions: they are consequences of the
-      // branch already chosen, so they can never be "unanswered".
-      if (s.kind === "IDENTITY" || s.kind === "QUANTITY") return false;
+      // Only questions can be answered. IDENTITY and QUANTITY are consequences
+      // of the answer already chosen, and INFO has nothing to answer — counting
+      // it as required used to leave buyers stuck on a screen with no buttons.
+      if (s.kind !== "SINGLE_CHOICE") return false;
       return !answers[s.id];
     })
     .map((s) => s.id);

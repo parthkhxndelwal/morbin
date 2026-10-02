@@ -21,7 +21,7 @@ export async function generateMetadata({
   const { id } = await params;
   const event = await getOrgEvent(id, org._id.toString());
   const name = event?.title ?? "Event";
-  // Tab pages ("Booking flow", "Orders"…) read "Booking flow · Fest — Morbin".
+  // Tab pages ("Orders"…) read "Orders · Fest — Morbin".
   return { title: { default: name, template: `%s · ${name} — Morbin` } };
 }
 
@@ -52,7 +52,7 @@ export default async function EventLayout({
     ...(manage ? [{ label: "Details", path: "details" }] : []),
     ...(manage
       ? [
-          { label: "Booking flow", path: "flow" },
+          { label: "Booking rules", path: "flow" },
           { label: "Appearance", path: "appearance" },
         ]
       : []),

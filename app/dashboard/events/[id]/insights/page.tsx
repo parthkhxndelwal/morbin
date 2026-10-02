@@ -113,7 +113,7 @@ export default async function InsightsPage({ params }: { params: Promise<{ id: s
             <Card size="sm" className="bg-muted/40">
               <CardHeader>
                 <CardDescription>
-                  Tickets sold before this event had a booking flow carry no audience, so they
+                  Tickets sold before this event had booking rules carry no group, so they
                   can&apos;t be grouped here. New sales are grouped automatically.
                 </CardDescription>
               </CardHeader>
