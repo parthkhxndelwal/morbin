@@ -1,15 +1,16 @@
 import { redirect } from "next/navigation";
 import type { Metadata } from "next";
-import { auth, signOut } from "@/lib/auth";
-import { getOrgForUser } from "@/lib/organizations";
+import { AuthLayout } from "@/components/features/auth/auth-layout";
 import { Button } from "@/components/ui/button";
-import { AuthShell } from "./auth-shell";
+import { auth, signOut } from "@/lib/auth";
+import { isGoogleConfigured } from "@/lib/config";
+import { getOrgForUser } from "@/lib/organizations";
 import { LoginForm } from "./login-form";
 import { VerifyEmail } from "./verify-email";
 
 export const metadata: Metadata = {
   title: "Sign in",
-  description: "Sign in to your Morbin organizer account.",
+  description: "Sign in to your Morbin account.",
 };
 
 /**
@@ -25,27 +26,27 @@ export const metadata: Metadata = {
 export default async function AuthPage({
   searchParams,
 }: {
-  searchParams: Promise<{ token?: string }>;
+  searchParams: Promise<{ token?: string; callbackUrl?: string }>;
 }) {
-  const { token } = await searchParams;
+  const { token, callbackUrl } = await searchParams;
 
   if (token) {
     return (
-      <AuthShell>
-        <div className="rounded-2xl border border-white/10 bg-white/5 p-6 text-center">
-          <VerifyEmail token={token} />
-        </div>
-      </AuthShell>
+      <AuthLayout>
+        <VerifyEmail token={token} />
+      </AuthLayout>
     );
   }
 
   const session = await auth();
 
   if (!session?.user?.id) {
+    // Only same-site paths, so the sign-in page can't be used as an open redirect.
+    const next = callbackUrl?.startsWith("/") && !callbackUrl.startsWith("//") ? callbackUrl : "/dashboard";
     return (
-      <AuthShell>
-        <LoginForm />
-      </AuthShell>
+      <AuthLayout>
+        <LoginForm googleEnabled={isGoogleConfigured()} callbackUrl={next} />
+      </AuthLayout>
     );
   }
 
@@ -55,33 +56,36 @@ export default async function AuthPage({
   if (resolved) redirect("/dashboard");
 
   return (
-    <AuthShell>
+    <AuthLayout>
       <div className="space-y-6">
         <div className="space-y-2">
-          <h1 className="text-2xl font-bold tracking-tight">You&apos;re on the list</h1>
-          <p className="text-sm leading-relaxed text-neutral-400">
-            Your account is active. We&apos;re setting up your organization now — once
-            it&apos;s ready you&apos;ll be able to create events and start selling tickets.
+          <h1 className="text-2xl font-semibold tracking-tight">You&apos;re signed in</h1>
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            This account isn&apos;t part of an organisation yet. If you booked tickets, they&apos;re on your event&apos;s
+            tickets page. To sell tickets, apply to list your event.
           </p>
         </div>
-
-        <div className="rounded-2xl border border-white/10 bg-white/5 p-5 text-sm">
-          <p className="text-neutral-400">
-            Signed in as <span className="text-white">{session.user.email}</span>
+        <div className="rounded-lg border bg-muted/40 p-4 text-sm">
+          <p className="text-muted-foreground">
+            Signed in as <span className="font-medium text-foreground">{session.user.email}</span>
           </p>
         </div>
-
-        <form
-          action={async () => {
-            "use server";
-            await signOut({ redirectTo: "/auth" });
-          }}
-        >
-          <Button variant="outline" className="w-full">
-            Sign out
+        <div className="grid gap-2">
+          <Button nativeButton={false} render={<a href="/apply" />}>
+            List your event
           </Button>
-        </form>
+          <form
+            action={async () => {
+              "use server";
+              await signOut({ redirectTo: "/auth" });
+            }}
+          >
+            <Button variant="outline" className="w-full">
+              Sign out
+            </Button>
+          </form>
+        </div>
       </div>
-    </AuthShell>
+    </AuthLayout>
   );
 }

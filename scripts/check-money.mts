@@ -15,7 +15,8 @@ import { getOrgBalance } from "@/lib/ledger";
 import { getPlatformSettings, gstReady } from "@/lib/platform-settings";
 import { getOrderTicketPdf } from "@/lib/ticket-documents";
 import { capturePaidOrder, createHeldOrder, expireStaleOrders, releaseOrder } from "@/lib/orders";
-import { cancelPayout, issuePayout } from "@/lib/payouts";
+import { issueOrgFeeInvoice } from "@/lib/invoices";
+import { cancelPayout, issuePayout, markPayoutPaid } from "@/lib/payouts";
 import { computePricing } from "@/lib/pricing";
 import {
   completeRefundManually,
@@ -24,7 +25,18 @@ import {
   requestRefund,
 } from "@/lib/refunds";
 import { TxAbort } from "@/lib/tx";
-import type { EmailRecord, Event, Invoice, LedgerEntry, Order, RefundCase, Ticket, TicketType } from "@/lib/types";
+import type {
+  EmailRecord,
+  Event,
+  Invoice,
+  LedgerEntry,
+  Order,
+  Payout,
+  PlatformSettings,
+  RefundCase,
+  Ticket,
+  TicketType,
+} from "@/lib/types";
 
 if (!/test|dev/i.test(getDbName())) {
   console.error(`Refusing to run against "${getDbName()}"`);
@@ -43,6 +55,8 @@ const ownerId = new ObjectId().toString();
 const now = new Date();
 
 let passed = 0;
+let settingsTouched = false;
+let originalSettings: PlatformSettings | null = null;
 async function step(name: string, fn: () => Promise<void>) {
   await fn();
   passed++;
@@ -61,12 +75,12 @@ async function rejects(fn: () => Promise<unknown>, match: RegExp) {
   assert.fail("expected an error");
 }
 
-function makeOrder(qty: number): Order {
+function makeOrder(qty: number, bearer: "CUSTOMER" | "ORGANISER" = "CUSTOMER"): Order {
   const items = [{ ticketTypeId: typeId, name: "General", quantity: qty, unitPricePaise: 50_000 }];
   const pricing = computePricing([{ unitPricePaise: 50_000, quantity: qty }], {
     feeBps: 700,
     gstBps: 1800,
-    bearer: "CUSTOMER",
+    bearer,
   });
   const _id = new ObjectId();
   return {
@@ -337,8 +351,93 @@ try {
     assert.equal(await releaseOrder(stale._id!, "FAILED"), false);
   });
 
+  await step("ORG_FEE invoice: one per paid payout, equal to the absorbed fee, idempotent", async () => {
+    // Issuing needs Morbin's GST details; use fixtures if the test DB has none
+    // and put the original settings back afterwards.
+    if (!gstReady((await getPlatformSettings()).gst)) {
+      originalSettings = (await db.collection<PlatformSettings>("platformSettings").findOne({ _id: "platform" })) ?? null;
+      await db.collection<PlatformSettings>("platformSettings").updateOne(
+        { _id: "platform" },
+        {
+          $set: {
+            gst: {
+              legalName: "Morbin Check Pvt Ltd",
+              tradeName: "Morbin",
+              gstin: "06AAPFU0939F1ZV",
+              pan: "AAPFU0939F",
+              address: "Gurugram, Haryana",
+              state: "Haryana",
+              stateCode: "06",
+              sac: "998599",
+              rateBps: 1800,
+              splitRule: "SUPPLIER_STATE",
+              invoicePrefix: "MRB",
+              footerText: "Check fixture",
+            },
+          },
+        },
+        { upsert: true },
+      );
+      settingsTouched = true;
+    }
+    const absorbed = makeOrder(1, "ORGANISER");
+    await createHeldOrder(absorbed);
+    const r = await capturePaidOrder({
+      razorpayOrderId: absorbed.razorpayOrderId,
+      paymentId: "pay_test_absorbed",
+      amountPaise: absorbed.pricing!.orderTotalPaise,
+      currency: "INR",
+      gatewayFeePaise: 0,
+      gatewayTaxPaise: 0,
+      method: "upi",
+    });
+    assert.equal(r.status, "captured");
+    const fee = absorbed.pricing!.feePaise;
+    assert.equal(fee, 3_500);
+
+    const draft = await issuePayout({ organizationId: orgId, cutoff: new Date(), note: null, adminId });
+    assert.equal(draft.totals.feesPaise, -fee);
+    const payoutId = draft._id!.toString();
+    const statement = Buffer.from("%PDF-1.4\n% check fixture\n%%EOF\n");
+    const paidOut = await markPayoutPaid({
+      id: payoutId,
+      adminId,
+      bankReference: "UTR-CHECK-1",
+      transferredAt: new Date(),
+      statement: { fileName: "statement.pdf", body: statement },
+    });
+    assert.ok(paidOut.invoiceDocId, "the invoice PDF is linked from the payout");
+
+    const invoices = await db.collection<Invoice>("invoices").find({ payoutId, kind: "ORG_FEE" }).toArray();
+    assert.equal(invoices.length, 1);
+    const inv = invoices[0];
+    assert.equal(inv.totalPaise, fee);
+    assert.equal(inv.taxablePaise, absorbed.pricing!.feeBasePaise);
+    assert.equal(inv.cgstPaise + inv.sgstPaise + inv.igstPaise, absorbed.pricing!.feeGstPaise);
+    assert.equal(inv.recipient.name, "Money Check Org");
+    // Unregistered organisation, state unknown → supplier's state → intra-state.
+    const supplier = (await getPlatformSettings()).gst;
+    assert.equal(inv.placeOfSupply, `${supplier.state} (${supplier.stateCode})`);
+    if (supplier.splitRule === "SUPPLIER_STATE") assert.equal(inv.igstPaise, 0);
+    // Same gapless series as customer invoices: this was the latest number.
+    const [prefix, fy] = inv.number.split("/");
+    const counter = await db.collection<{ _id: string; seq: number }>("counters").findOne({ _id: `invoice:${prefix}:${fy}` });
+    assert.equal(Number(inv.number.split("/")[2]), counter!.seq);
+
+    const again = await issueOrgFeeInvoice(payoutId);
+    assert.equal(again!.number, inv.number);
+    assert.equal(await db.collection("invoices").countDocuments({ payoutId, kind: "ORG_FEE" }), 1);
+    const after = await db.collection<Payout>("payouts").findOne({ _id: draft._id });
+    assert.equal(after!.invoiceDocId, paidOut.invoiceDocId);
+    assert.equal((await db.collection<{ seq: number }>("counters").findOne({ _id: `invoice:${prefix}:${fy}` as never }))!.seq, counter!.seq);
+  });
+
   console.log(`\n${passed} money checks passed`);
 } finally {
+  if (settingsTouched) {
+    if (originalSettings) await db.collection<PlatformSettings>("platformSettings").replaceOne({ _id: "platform" }, originalSettings);
+    else await db.collection<PlatformSettings>("platformSettings").deleteOne({ _id: "platform" });
+  }
   const orderIds = (await db.collection("orders").find({ organizationId: orgId }).toArray()).map((o) =>
     o._id.toString(),
   );
@@ -354,7 +453,7 @@ try {
     db.collection("auditLogs").deleteMany({ organizationId: orgId }),
     db.collection("notifications").deleteMany({ $or: [{ organizationId: orgId }, { kind: /REFUND/, organizationId: null, createdAt: { $gte: now } }] }),
     db.collection("emailDeliveries").deleteMany({ orderId: { $in: orderIds } }),
-    db.collection("invoices").deleteMany({ orderId: { $in: orderIds } }),
+    db.collection("invoices").deleteMany({ $or: [{ orderId: { $in: orderIds } }, { organizationId: orgId }] }),
     ...(await db.collection("documents").find({ organizationId: orgId }).toArray()).map((d) => deleteDocument(d._id.toString())),
     db.collection("locks").deleteOne({ _id: `balance:${orgId}` as never }),
   ]);

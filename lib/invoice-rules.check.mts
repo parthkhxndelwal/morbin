@@ -5,7 +5,15 @@
  */
 import assert from "node:assert/strict";
 import { writeFileSync } from "node:fs";
-import { amountInWords, financialYear, invoiceNumber, splitTax } from "./invoice-rules.ts";
+import {
+  amountInWords,
+  financialYear,
+  GST_STATES,
+  invoiceNumber,
+  orgPlaceOfSupply,
+  splitTax,
+  splitTaxFor,
+} from "./invoice-rules.ts";
 import { buildTicketPdf } from "./ticket-pdf.ts";
 
 let passed = 0;
@@ -39,6 +47,53 @@ await check("CGST + SGST add back to the GST, odd paise included", () => {
     assert.equal(t.igstPaise, 0);
   }
   assert.deepEqual(splitTax(534, "ALWAYS_IGST"), { cgstPaise: 0, sgstPaise: 0, igstPaise: 534 });
+});
+
+await check("ORG_FEE place of supply: registered, unregistered, ALWAYS_IGST", () => {
+  const supplier = { state: "Haryana", stateCode: "06", splitRule: "SUPPLIER_STATE" as const };
+  // Registered in the supplier's state → CGST + SGST.
+  assert.deepEqual(orgPlaceOfSupply({ supplier, recipient: { gstin: "06ABCDE1234F1Z5" } }), {
+    state: "Haryana",
+    stateCode: "06",
+    interState: false,
+  });
+  // Registered elsewhere → IGST, place of supply from the GSTIN.
+  assert.deepEqual(orgPlaceOfSupply({ supplier, recipient: { gstin: "27ABCDE1234F1Z5" } }), {
+    state: "Maharashtra",
+    stateCode: "27",
+    interState: true,
+  });
+  // The GSTIN wins over a stale profile state.
+  assert.equal(orgPlaceOfSupply({ supplier, recipient: { gstin: "27ABCDE1234F1Z5", stateCode: "06" } }).stateCode, "27");
+  // Unregistered with a known state → that state.
+  assert.deepEqual(orgPlaceOfSupply({ supplier, recipient: { gstin: null, stateCode: "29", state: "Karnataka" } }), {
+    state: "Karnataka",
+    stateCode: "29",
+    interState: true,
+  });
+  assert.equal(orgPlaceOfSupply({ supplier, recipient: { stateCode: "06" } }).interState, false);
+  // Unregistered, state unknown → the supplier's own state.
+  assert.deepEqual(orgPlaceOfSupply({ supplier, recipient: {} }), { state: "Haryana", stateCode: "06", interState: false });
+  assert.deepEqual(orgPlaceOfSupply({ supplier, recipient: { gstin: "", stateCode: "" } }), {
+    state: "Haryana",
+    stateCode: "06",
+    interState: false,
+  });
+  // ALWAYS_IGST overrides even a same-state recipient.
+  const igst = { ...supplier, splitRule: "ALWAYS_IGST" as const };
+  assert.equal(orgPlaceOfSupply({ supplier: igst, recipient: { gstin: "06ABCDE1234F1Z5" } }).interState, true);
+  assert.equal(orgPlaceOfSupply({ supplier: igst, recipient: {} }).interState, true);
+});
+
+await check("splitTaxFor follows the place-of-supply decision", () => {
+  assert.deepEqual(splitTaxFor(535, true), { cgstPaise: 0, sgstPaise: 0, igstPaise: 535 });
+  assert.deepEqual(splitTaxFor(535, false), { cgstPaise: 267, sgstPaise: 268, igstPaise: 0 });
+});
+
+await check("GST state codes are unique two-digit codes", () => {
+  const codes = GST_STATES.map((s) => s.code);
+  assert.equal(new Set(codes).size, codes.length);
+  assert.ok(codes.every((c) => /^\d{2}$/.test(c)));
 });
 
 await check("amount in words uses Indian grouping", () => {

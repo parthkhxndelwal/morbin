@@ -1,5 +1,4 @@
-import Link from "next/link";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { AuthLayout } from "@/components/features/auth/auth-layout";
 import { ApplyForm } from "./apply-form";
 
 export const metadata = {
@@ -9,24 +8,17 @@ export const metadata = {
 
 export default function ApplyPage() {
   return (
-    <main className="min-h-dvh bg-muted/40 px-4 py-10">
-      <div className="mx-auto w-full max-w-2xl space-y-6">
-        <Link href="/" className="text-lg font-semibold tracking-tight">
-          Morbin
-        </Link>
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-2xl">List your event on Morbin</CardTitle>
-            <CardDescription>
-              Tell us who you are and what you run. A person reviews every application; once approved you get an
-              email to set up your account and can start selling the same day.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ApplyForm />
-          </CardContent>
-        </Card>
+    <AuthLayout wide panel={false}>
+      <div className="space-y-6">
+        <div className="space-y-2">
+          <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">List your event on Morbin</h1>
+          <p className="text-sm text-muted-foreground">
+            Tell us who you are and what you run. A person reviews every application; once approved you get an email
+            to set up your account and can start selling the same day.
+          </p>
+        </div>
+        <ApplyForm />
       </div>
-    </main>
+    </AuthLayout>
   );
 }

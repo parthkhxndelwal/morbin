@@ -9,14 +9,11 @@
     "lint": "eslint",
     "db:indexes": "node --experimental-strip-types scripts/ensure-indexes.ts",
     "db:migrate": "node --experimental-strip-types scripts/migrate-roles.ts",
-    "admin:bootstrap": "node --experimental-strip-types scripts/bootstrap-admin.ts",
+    "admin:bootstrap": "tsx --tsconfig scripts/tsconfig.checks.json --env-file-if-exists=.env.local scripts/bootstrap-admin.mts",
     "check:bootstrap": "node --experimental-strip-types lib/admin-bootstrap.check.mts",
     "check:delete-plan": "node --experimental-strip-types lib/admin-delete-plan.check.mts",
     "check:force-delete": "node scripts/check-force-delete.mjs",
     "test:flow": "node --experimental-strip-types scripts/test-flow.ts",
-    "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
-    "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
-    "cf-typegen": "wrangler types --env-interface CloudflareEnv ./cloudflare-env.d.ts",
     "check:pricing": "node --experimental-strip-types lib/pricing.check.mts",
     "check:money": "tsx --tsconfig scripts/tsconfig.checks.json --env-file=.env.local scripts/check-money.mts",
     "seed:dev-owner": "node --experimental-strip-types --env-file=.env.local scripts/seed-dev-owner.ts",
@@ -55,7 +52,6 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@opennextjs/cloudflare": "^1.20.6",
     "@tailwindcss/postcss": "^4",
     "@types/bcryptjs": "^2.4.6",
     "@types/node": "^20",
@@ -66,13 +62,11 @@
     "eslint-config-next": "16.3.5",
     "tailwindcss": "^4",
     "tsx": "^4.23.15",
-    "typescript": "^5",
-    "wrangler": "^4.134.0"
+    "typescript": "^5"
   },
   "allowScripts": {
     "esbuild@0.25.4": true,
     "esbuild@0.28.1": true,
-    "workerd@1.20260917.1": true,
     "unrs-resolver@1.12.2": true
   }
 }
