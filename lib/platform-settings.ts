@@ -62,3 +62,35 @@ export function pricingPolicyFor(
     bearer: feeBearerFor(org, event),
   };
 }
+
+/**
+ * Save platform settings. Affects only what happens afterwards: orders keep
+ * their frozen pricing and issued invoices keep the details printed on them.
+ */
+export async function savePlatformSettings(
+  patch: { defaultFeeBps: number; defaultRetentionMonths: number; gst: GstSettings },
+  adminId: string,
+): Promise<void> {
+  const db = await getDb();
+  const before = await getPlatformSettings();
+  await db
+    .collection<PlatformSettings>("platformSettings")
+    .updateOne({ _id: "platform" }, { $set: { ...patch, updatedBy: adminId, updatedAt: new Date() } }, { upsert: true });
+  const changed = [
+    ...(before.defaultFeeBps !== patch.defaultFeeBps ? ["defaultFeeBps"] : []),
+    ...(before.defaultRetentionMonths !== patch.defaultRetentionMonths ? ["defaultRetentionMonths"] : []),
+    ...Object.keys(patch.gst).filter(
+      (k) => before.gst[k as keyof GstSettings] !== patch.gst[k as keyof GstSettings],
+    ).map((k) => `gst.${k}`),
+  ];
+  const { audit } = await import("@/lib/audit");
+  await audit({
+    actorId: adminId,
+    actorRole: "ADMIN",
+    action: "platform.settings.updated",
+    targetType: "platform",
+    targetId: null,
+    organizationId: null,
+    meta: { fields: changed },
+  });
+}

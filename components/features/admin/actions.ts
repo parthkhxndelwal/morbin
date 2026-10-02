@@ -2,6 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { AdminError, requireAdmin } from "@/lib/admin";
+import { retryEmail } from "@/lib/admin-desk";
+import { approveApplication, rejectApplication, requestApplicationInfo } from "@/lib/applications";
 import {
   createOrganization,
   deleteUnusedOrganization,
@@ -14,7 +16,14 @@ import {
 import { err, ok, zodFieldErrors, type Result } from "@/lib/result";
 import { inviteToTeam, removeFromTeam, revokeInvite, type InviteOutcome } from "@/lib/team";
 import { TxAbort } from "@/lib/tx";
-import { adminCreateOrgSchema, adminOrgBasicsSchema, feePercentSchema, teamInviteSchema } from "@/lib/validations";
+import { savePlatformSettings } from "@/lib/platform-settings";
+import {
+  adminCreateOrgSchema,
+  adminOrgBasicsSchema,
+  feePercentSchema,
+  platformSettingsSchema,
+  teamInviteSchema,
+} from "@/lib/validations";
 
 /**
  * Morbin admin actions on organisations. Each re-checks the admin role on the
@@ -117,4 +126,67 @@ export async function adminRevokeInviteAction(organizationId: string, inviteId: 
   const a = await admin();
   if ("error" in a) return err(a.error);
   return run(() => revokeInvite({ organizationId, userId: a.id, role: "ADMIN" }, inviteId), "Invite revoked");
+}
+
+/* Applications */
+
+export async function approveApplicationAction(id: string): Promise<Result<{ organizationId: string }>> {
+  const a = await admin();
+  if ("error" in a) return err(a.error);
+  return run(() => approveApplication(id, a), "Approved — the owner has been emailed");
+}
+
+export async function rejectApplicationAction(id: string, reason: string): Promise<Result> {
+  const a = await admin();
+  if ("error" in a) return err(a.error);
+  if (reason.trim().length < 5) return err("Tell them why (at least 5 characters).");
+  return run(() => rejectApplication(id, reason.trim().slice(0, 2000), a.id), "Rejected — the applicant has been emailed");
+}
+
+export async function requestApplicationInfoAction(id: string, message: string): Promise<Result> {
+  const a = await admin();
+  if ("error" in a) return err(a.error);
+  if (message.trim().length < 5) return err("Write your question (at least 5 characters).");
+  return run(() => requestApplicationInfo(id, message.trim().slice(0, 2000), a.id), "Question sent to the applicant");
+}
+
+export async function retryEmailAction(id: string): Promise<Result> {
+  const a = await admin();
+  if ("error" in a) return err(a.error);
+  return run(async () => {
+    if (!(await retryEmail(id))) throw new TxAbort("That email is no longer failed.");
+  }, "Queued to send again");
+}
+
+export async function savePlatformSettingsAction(formData: FormData): Promise<Result> {
+  const a = await admin();
+  if ("error" in a) return err(a.error);
+  const parsed = platformSettingsSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return err("Check the highlighted fields.", zodFieldErrors(parsed.error.issues));
+  const v = parsed.data;
+  return run(
+    () =>
+      savePlatformSettings(
+        {
+          defaultFeeBps: v.defaultFee,
+          defaultRetentionMonths: v.defaultRetentionMonths,
+          gst: {
+            legalName: v.legalName,
+            tradeName: v.tradeName,
+            gstin: v.gstin,
+            pan: v.pan,
+            address: v.address,
+            state: v.state,
+            stateCode: v.stateCode,
+            sac: v.sac,
+            rateBps: v.gstRate,
+            splitRule: v.splitRule,
+            invoicePrefix: v.invoicePrefix,
+            footerText: v.footerText,
+          },
+        },
+        a.id,
+      ),
+    "Settings saved",
+  );
 }

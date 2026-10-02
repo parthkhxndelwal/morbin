@@ -118,7 +118,7 @@ export function OrgHeaderActions({ org }: { org: AdminOrgDetail }) {
         confirmLabel="Delete"
         destructive
         action={() => deleteOrganizationAction(org.id)}
-        onSuccess={() => router.push("/dashboard/admin")}
+        onSuccess={() => router.push("/dashboard/admin/orgs")}
       />
     </>
   );

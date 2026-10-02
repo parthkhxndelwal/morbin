@@ -127,6 +127,30 @@ export interface TeamInvite {
   updatedAt: Date;
 }
 
+/** "List your event": an organisation asking to sell tickets on Morbin. */
+export interface OrgApplication {
+  _id?: ObjectId;
+  status: "NEW" | "INFO_REQUESTED" | "APPROVED" | "REJECTED";
+  organizationName: string;
+  type: OrganizationType;
+  contactName: string;
+  email: string;
+  phone: string;
+  city: string;
+  eventsPerYear: string;
+  ticketsPerEvent: string;
+  gstin: string | null;
+  about: string;
+  /** Consent to be contacted about this application (DPDP). */
+  consentAt: Date;
+  decisionNote: string | null;
+  decidedBy: string | null;
+  decidedAt: Date | null;
+  organizationId: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export type EventStatus = "DRAFT" | "PUBLISHED" | "CANCELLED";
 
 export interface Event {
@@ -287,7 +311,9 @@ export type EmailKind =
   /** An existing Morbin user added to an organisation. */
   | "TEAM_ADDED"
   /** An account Morbin created for someone (e.g. a new organisation owner): choose a password. */
-  | "ACCOUNT_SETUP";
+  | "ACCOUNT_SETUP"
+  /** Organisation applications: received, more info needed, approved, rejected. */
+  | "APPLICATION";
 
 export interface EmailRecord {
   _id?: ObjectId;
@@ -320,6 +346,9 @@ export interface EmailRecord {
     inviterName?: string;
     /** A link carrying a secret (join token). Cleared once the email is sent. */
     link?: string | null;
+    /** APPLICATION: which update this is, and Morbin's message if any. */
+    applicationStage?: "RECEIVED" | "INFO_REQUESTED" | "APPROVED" | "REJECTED";
+    message?: string | null;
   } | null;
 }
 

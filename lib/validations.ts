@@ -258,3 +258,64 @@ export const feePercentSchema = z.object({
     .max(300, "At most 300 characters")
     .transform((v) => v || null),
 });
+
+/** Public "List your event" form. */
+export const applicationSchema = z.object({
+  organizationName: z.string().trim().min(2, "At least 2 characters").max(120, "At most 120 characters"),
+  type: z.enum(["EVENT", "INSTITUTION", "CORPORATE"], { error: "Choose what describes you best" }),
+  contactName: z.string().trim().min(2, "At least 2 characters").max(80, "At most 80 characters"),
+  email: z.string().trim().toLowerCase().pipe(z.string().email("Enter a valid email address").max(254)),
+  phone: z.string().trim().regex(/^\+?[\d\s-]{7,18}$/, "Enter a valid phone number"),
+  city: z.string().trim().min(2, "Which city are you in?").max(80, "At most 80 characters"),
+  eventsPerYear: z.enum(["1", "2-5", "6-20", "20+"], { error: "Choose one" }),
+  ticketsPerEvent: z.enum(["<100", "100-500", "500-2000", "2000+"], { error: "Choose one" }),
+  gstin: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .refine((v) => v === "" || GSTIN_RE.test(v), "A GSTIN looks like 27AAPFU0939F1ZV")
+    .transform((v) => v || null),
+  about: z.string().trim().min(20, "Tell us a little more (at least 20 characters)").max(2000, "At most 2000 characters"),
+  consent: z.literal("on", { error: "We need your consent to contact you about this application" }),
+});
+
+/** Admin → Settings: platform defaults and Morbin's GST identity for invoices. */
+export const platformSettingsSchema = z.object({
+  defaultFee: z
+    .string()
+    .trim()
+    .regex(/^\d{1,2}(\.\d{1,2})?$/, "Enter a percentage like 5 or 7.5")
+    .transform((v) => Math.round(Number(v) * 100))
+    .refine((v) => v <= 3000, "At most 30%"),
+  defaultRetentionMonths: z.coerce.number().int("Whole months").min(1, "At least 1").max(120, "At most 120"),
+  legalName: z.string().trim().max(160),
+  tradeName: z.string().trim().max(160),
+  gstin: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .refine((v) => v === "" || GSTIN_RE.test(v), "A GSTIN looks like 27AAPFU0939F1ZV"),
+  pan: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .refine((v) => v === "" || /^[A-Z]{5}[0-9]{4}[A-Z]$/.test(v), "A PAN looks like AAPFU0939F"),
+  address: z.string().trim().max(500),
+  state: z.string().trim().max(60),
+  stateCode: z
+    .string()
+    .trim()
+    .refine((v) => v === "" || /^\d{2}$/.test(v), "Two digits, e.g. 07 for Delhi"),
+  sac: z
+    .string()
+    .trim()
+    .refine((v) => v === "" || /^\d{6}$/.test(v), "Six digits, e.g. 998599"),
+  gstRate: z
+    .string()
+    .trim()
+    .regex(/^\d{1,2}(\.\d{1,2})?$/, "Enter a rate like 18")
+    .transform((v) => Math.round(Number(v) * 100)),
+  splitRule: z.enum(["SUPPLIER_STATE", "ALWAYS_IGST"]),
+  invoicePrefix: z.string().trim().toUpperCase().regex(/^[A-Z0-9-]{1,10}$/, "Up to 10 letters, digits or dashes"),
+  footerText: z.string().trim().max(300),
+});

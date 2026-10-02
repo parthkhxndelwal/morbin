@@ -18,9 +18,10 @@
 		-Server
 	}
 
-	# Body limit: largest legitimate upload is a 5 MB event banner.
+	# Body limit: the largest legitimate upload is a 10 MB payout statement
+	# (the app's own server-action limit is 11 MB).
 	request_body {
-		max_size 6MB
+		max_size 12MB
 	}
 
 	reverse_proxy app:3000 {

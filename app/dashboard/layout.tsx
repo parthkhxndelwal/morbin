@@ -66,9 +66,13 @@ export default async function DashboardLayout({
     nav = {
       label: "Platform",
       main: [
-        { title: "Organisations", url: "/dashboard/admin", icon: "organisations", exact: true },
+        { title: "Overview", url: "/dashboard/admin", icon: "overview", exact: true },
+        { title: "Organisations", url: "/dashboard/admin/orgs", icon: "organisations" },
+        { title: "Applications", url: "/dashboard/admin/applications", icon: "applications" },
         { title: "Payouts", url: "/dashboard/admin/payouts", icon: "payouts" },
         { title: "Refunds", url: "/dashboard/admin/refunds", icon: "refunds" },
+        { title: "Audit log", url: "/dashboard/admin/audit", icon: "audit" },
+        { title: "Settings", url: "/dashboard/admin/settings", icon: "settings" },
       ],
       shortcuts: [],
       secondary: [{ title: "Documentation", url: "/docs", icon: "docs" }],

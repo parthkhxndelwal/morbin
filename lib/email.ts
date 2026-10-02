@@ -19,10 +19,13 @@ export async function sendEmail({
   to,
   subject,
   html,
+  replyTo,
 }: {
   to: string;
   subject: string;
   html: string;
+  /** Where a reply should go when the From address isn't read by a person. */
+  replyTo?: string | null;
 }): Promise<{ ok: boolean; id?: string; dev?: boolean }> {
   const client = sesClient();
   if (!client) {
@@ -34,6 +37,7 @@ export async function sendEmail({
       new SendEmailCommand({
         FromEmailAddress: fromAddress(),
         Destination: { ToAddresses: [to] },
+        ...(replyTo ? { ReplyToAddresses: [replyTo] } : {}),
         Content: {
           Simple: {
             Subject: { Data: subject, Charset: "UTF-8" },
@@ -277,6 +281,24 @@ export async function flushEmailQueue(limit = 20): Promise<{ sent: number; faile
           arn: meta.refundArn ? esc(meta.refundArn) : null,
           speed: meta.refundSpeed ?? "NORMAL",
         });
+      } else if (job.kind === "APPLICATION") {
+        const org = esc(meta.organizationName ?? "your organisation");
+        const note = meta.message ? `<blockquote style="margin:16px 0;padding:12px 16px;border-left:3px solid #7c3aed;background:#f6f3ff">${esc(meta.message).replace(/\n/g, "<br>")}</blockquote>` : "";
+        const stage = meta.applicationStage ?? "RECEIVED";
+        subject = {
+          RECEIVED: `We've received your application — ${meta.organizationName ?? "Morbin"}`,
+          INFO_REQUESTED: `A question about your Morbin application`,
+          APPROVED: `You're on Morbin — ${meta.organizationName ?? ""}`,
+          REJECTED: `Your Morbin application`,
+        }[stage];
+        const body = {
+          RECEIVED: `<p>Thanks for applying to sell tickets for <strong>${org}</strong> on Morbin. We review every application by hand and usually reply within two working days.</p>`,
+          INFO_REQUESTED: `<p>We're reviewing the application for <strong>${org}</strong> and need a little more information:</p>${note}<p>Just reply to this email.</p>`,
+          APPROVED: `<p>Good news: <strong>${org}</strong> is approved. Sign in with your existing Morbin account to create your first event.</p>${emailButton(esc(meta.link ?? appUrl("/auth")), "Sign in")}`,
+          REJECTED: `<p>Thank you for your interest in Morbin. We're not able to approve <strong>${org}</strong> at the moment.</p>${note}<p>You're welcome to reply to this email if you have questions.</p>`,
+        }[stage];
+        html = `<div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#111">
+          <p>Hi ${attendeeName},</p>${body}</div>`;
       } else if (job.kind === "ACCOUNT_SETUP") {
         const organizationName = esc(meta.organizationName ?? "your organisation");
         subject = `Set up your Morbin account for ${meta.organizationName ?? "your organisation"}`;
@@ -314,7 +336,12 @@ export async function flushEmailQueue(limit = 20): Promise<{ sent: number; faile
         subject = `Update about ${meta.eventTitle ?? "your event"}`;
         html = `<p>There is an update about ${eventTitle}. Please check your tickets page.</p>`;
       }
-      const r = await sendEmail({ to: job.recipient, subject, html });
+      const r = await sendEmail({
+        to: job.recipient,
+        subject,
+        html,
+        replyTo: job.kind === "APPLICATION" ? (process.env.SUPPORT_EMAIL ?? null) : null,
+      });
       if (!r.ok) throw new Error("send failed");
       await db.collection("emailDeliveries").updateOne(
         { _id: job._id },

@@ -51,6 +51,12 @@ export const STATUS = {
     REJECTED: { label: "Rejected", tone: "danger" },
     RESTRICTED: { label: "Restricted", tone: "danger" },
   },
+  application: {
+    NEW: { label: "New", tone: "info" },
+    INFO_REQUESTED: { label: "Waiting on applicant", tone: "warning" },
+    APPROVED: { label: "Approved", tone: "success" },
+    REJECTED: { label: "Rejected", tone: "neutral" },
+  },
   payout: {
     DRAFT: { label: "Draft", tone: "neutral" },
     PAID: { label: "Paid", tone: "success", description: "Transferred; awaiting acknowledgement." },
