@@ -10,6 +10,7 @@ import {
   OrgHeaderActions,
   OwnerCard,
 } from "@/components/features/admin/org-detail";
+import { DatasetsList, NewDatasetButton } from "@/components/features/datasets/datasets-list";
 import { IssuePayoutButton, PayoutAccountCard } from "@/components/features/payouts/admin-desk";
 import { PayoutsTable } from "@/components/features/payouts/payouts-table";
 import { BreadcrumbLabel } from "@/components/breadcrumb-labels";
@@ -24,6 +25,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { requireAdmin } from "@/lib/admin";
 import { getAdminOrgDetail } from "@/lib/admin-orgs";
+import { listDatasets } from "@/lib/datasets";
 import { getPayoutRows } from "@/lib/dashboard-data";
 import { getTeam } from "@/lib/team";
 
@@ -34,7 +36,7 @@ export default async function AdminOrgPage({ params }: { params: Promise<{ id: s
   const { id } = await params;
   const org = await getAdminOrgDetail(id);
   if (!org) notFound();
-  const [payouts, team] = await Promise.all([getPayoutRows(id), getTeam(id, admin.id)]);
+  const [payouts, team, datasets] = await Promise.all([getPayoutRows(id), getTeam(id, admin.id), listDatasets(id)]);
 
   return (
     <div className="space-y-6">
@@ -64,6 +66,7 @@ export default async function AdminOrgPage({ params }: { params: Promise<{ id: s
           <TabsTrigger value="money">Money</TabsTrigger>
           <TabsTrigger value="members">Members</TabsTrigger>
           <TabsTrigger value="events">Events</TabsTrigger>
+          <TabsTrigger value="datasets">Datasets</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="mt-4 grid gap-4 lg:grid-cols-2">
@@ -139,6 +142,15 @@ export default async function AdminOrgPage({ params }: { params: Promise<{ id: s
               </Table>
             </div>
           )}
+        </TabsContent>
+        <TabsContent value="datasets" className="mt-4 space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm text-muted-foreground">
+              Opening a dataset is support access: changes are logged and the owner is notified.
+            </p>
+            <NewDatasetButton supportOrgId={org.id} basePath={`/dashboard/admin/orgs/${org.id}/datasets`} />
+          </div>
+          <DatasetsList datasets={datasets} basePath={`/dashboard/admin/orgs/${org.id}/datasets`} supportOrgId={org.id} />
         </TabsContent>
       </Tabs>
     </div>

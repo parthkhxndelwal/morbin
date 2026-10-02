@@ -847,6 +847,37 @@ export interface Notification {
   createdAt: Date;
 }
 
+/**
+ * An organisation's reusable list (roll numbers, staff), owned by the
+ * organisation rather than one event. Read-only to checkout.
+ */
+export interface Dataset {
+  _id?: ObjectId;
+  organizationId: string;
+  name: string;
+  columns: import("@/lib/dataset-rules").DatasetColumn[];
+  /** `key` of the column whose normalised value identifies a row; null until columns exist. */
+  keyColumn: string | null;
+  rowCount: number;
+  createdBy: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface DatasetRow {
+  _id?: ObjectId;
+  datasetId: string;
+  organizationId: string;
+  /** Column key → value as typed. */
+  values: Record<string, string>;
+  /** `normaliseKey(values[keyColumn])`; unique per dataset. */
+  keyNormalised: string;
+  /** The import that last wrote this row (REPLACE removes rows from older imports). */
+  importId?: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 /** A message on a refund case: Morbin admin → customer (by email). */
 export interface RefundMessage {
   _id?: ObjectId;

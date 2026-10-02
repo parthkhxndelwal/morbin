@@ -113,6 +113,9 @@ export default async function DashboardLayout({
     if (can(resolved!.role, "finance")) {
       orgMain.push({ title: "Payouts", url: "/dashboard/payouts", icon: "payouts" });
     }
+    if (can(resolved!.role, "manageDatasets")) {
+      orgMain.push({ title: "Datasets", url: "/dashboard/datasets", icon: "datasets" });
+    }
     orgMain.push({ title: "Team", url: "/dashboard/team", icon: "team" });
     if (can(resolved!.role, "finance")) {
       orgMain.push({

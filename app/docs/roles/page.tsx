@@ -13,14 +13,14 @@ export default function RolesPage() {
       sections={[
         {
           h: "Owner",
-          p: "One per organization, and the only role that can change anything. An owner can create and publish events, add ticket types, issue refunds, and run check-in. Your account is the owner of any organization you set up.",
+          p: "One per organization, and the only role that can change anything. An owner can create and publish events, add ticket types, manage datasets, issue refunds, and run check-in. Your account is the owner of any organization you set up.",
         },
         {
           h: "Member",
           p: "Everyone else. A member can open the dashboard, browse your events and ticket types, and run the check-in desk. A member cannot create or edit events, cannot publish, and cannot issue refunds.",
           list: [
             "Can: view the dashboard, view events, run check-in.",
-            "Cannot: create, edit or publish events, add ticket types, issue refunds.",
+            "Cannot: create, edit or publish events, add ticket types, see datasets, issue refunds.",
           ],
         },
         {
