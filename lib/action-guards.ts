@@ -72,3 +72,29 @@ export async function eventEditor(
   if (guard.actor.orgId !== event.organizationId) return { error: "Event not found." };
   return { actor: { organizationId: event.organizationId, userId: session.user.id, capacity: "OWNER" } };
 }
+
+/**
+ * Who may manage an organisation's datasets: its OWNER, or a platform ADMIN as
+ * support for the organisation named by `supportOrgId`. The id is only read
+ * for admins; anyone else always acts on their own organisation.
+ */
+export async function datasetActor(
+  supportOrgId: string | null,
+): Promise<{ actor: import("@/lib/datasets").DatasetActor } | { error: string }> {
+  const session = await auth();
+  if (!session?.user?.id) return { error: "Your session has ended. Sign in again." };
+  const { getDb, toObjectId } = await import("@/lib/db");
+  const db = await getDb();
+  const user = await db
+    .collection<{ role?: string }>("users")
+    .findOne({ _id: toObjectId(session.user.id) as never }, { projection: { role: 1 } });
+  if (user?.role === "ADMIN") {
+    const orgOid = supportOrgId ? toObjectId(supportOrgId) : null;
+    const org = orgOid ? await db.collection("organizations").findOne({ _id: orgOid }, { projection: { _id: 1 } }) : null;
+    if (!org) return { error: "Organisation not found." };
+    return { actor: { userId: session.user.id, orgId: org._id.toString(), role: "SUPPORT" } };
+  }
+  const guard = await orgActor("manageDatasets");
+  if ("error" in guard) return guard;
+  return { actor: { userId: session.user.id, orgId: guard.actor.orgId, role: "OWNER" } };
+}

@@ -38,18 +38,21 @@ export type Capability =
   /** See money: balances, payouts, statements. */
   | "finance"
   /** Invite and remove members. */
-  | "manageTeam";
+  | "manageTeam"
+  /** Create, import and edit the organisation's datasets (lists used by booking questions). */
+  | "manageDatasets";
 
 /**
  * SUPPORT is a Morbin admin working on one organisation's event on its behalf:
- * it can fix the event's setup, and deliberately nothing else — no money, no
- * refunds, no exports, and no buyers' personal data (no "view").
+ * it can fix the event's setup and load or edit the organisation's datasets
+ * (e.g. a student list the org emailed in), and deliberately nothing else — no
+ * money, no refunds, no exports, and no buyers' personal data (no "view").
  */
 export type AccessRole = OrgRole | "SUPPORT";
 
 const GRANTS: Record<AccessRole, readonly Capability[]> = {
-  SUPPORT: ["manageEvents"],
-  OWNER: ["view", "checkIn", "manageEvents", "refund", "export", "finance", "manageTeam"],
+  SUPPORT: ["manageEvents", "manageDatasets"],
+  OWNER: ["view", "checkIn", "manageEvents", "refund", "export", "finance", "manageTeam", "manageDatasets"],
   MEMBER: ["view", "checkIn"],
 };
 

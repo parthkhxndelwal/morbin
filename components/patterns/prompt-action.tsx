@@ -39,8 +39,17 @@ export function PromptAction({
   destructive = false,
   action,
   onSuccess,
+  initialValue = "",
+  open: controlledOpen,
+  onOpenChange,
 }: {
-  trigger: React.ReactElement;
+  /** The element that opens the dialog. Omit when controlled. */
+  trigger?: React.ReactElement;
+  /** Controlled mode, e.g. opened from a dropdown menu item. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  /** Pre-filled text, e.g. the current name when renaming. */
+  initialValue?: string;
   title: string;
   description?: React.ReactNode;
   label: string;
@@ -55,8 +64,13 @@ export function PromptAction({
   onSuccess?: () => void;
 }) {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
-  const [value, setValue] = useState("");
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const open = controlledOpen ?? uncontrolledOpen;
+  const setOpen = (next: boolean) => {
+    setUncontrolledOpen(next);
+    onOpenChange?.(next);
+  };
+  const [value, setValue] = useState(initialValue);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -74,7 +88,7 @@ export function PromptAction({
         return;
       }
       setOpen(false);
-      setValue("");
+      setValue(initialValue);
       toast.success(result.message ?? "Done");
       onSuccess?.();
       router.refresh();
@@ -93,7 +107,7 @@ export function PromptAction({
         if (!next) setError(null);
       }}
     >
-      <AlertDialogTrigger render={trigger} />
+      {trigger && <AlertDialogTrigger render={trigger} />}
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>

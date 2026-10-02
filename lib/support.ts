@@ -4,34 +4,44 @@ import { audit, notify } from "@/lib/audit";
 import type { Organization } from "@/lib/types";
 
 /**
- * Morbin support working on an organisation's event. Every change is visible
+ * Morbin support working on an organisation's event or datasets. Every change is visible
  * to the organisation: it is audit-logged with the admin as actor and the owner
  * gets a dashboard notification saying what changed.
  */
 
-export async function recordSupportChange(input: {
-  adminId: string;
-  organizationId: string;
-  eventId: string;
-  action: string;
-  summary: string;
-}): Promise<void> {
+export async function recordSupportChange(
+  input: {
+    adminId: string;
+    organizationId: string;
+    action: string;
+    summary: string;
+    /** Audit meta beyond `support: true` — counts only, never personal data. */
+    meta?: Record<string, unknown>;
+  } & (
+    | { eventId: string }
+    | { target: { type: "dataset"; id: string; link: string; title: string } }
+  ),
+): Promise<void> {
+  const target =
+    "eventId" in input
+      ? { type: "event", id: input.eventId, link: `/dashboard/events/${input.eventId}`, title: "Morbin support updated your event" }
+      : input.target;
   await audit({
     actorId: input.adminId,
     actorRole: "ADMIN",
     action: input.action,
-    targetType: "event",
-    targetId: input.eventId,
+    targetType: target.type,
+    targetId: target.id,
     organizationId: input.organizationId,
-    meta: { support: true },
+    meta: { ...input.meta, support: true },
   });
   await notify({
     organizationId: input.organizationId,
     audience: "ORG_OWNER",
     kind: "SUPPORT_CHANGE",
-    title: "Morbin support updated your event",
+    title: target.title,
     body: input.summary,
-    link: `/dashboard/events/${input.eventId}`,
+    link: target.link,
   });
 }
 
