@@ -68,9 +68,20 @@ export default function DocsIndexPage() {
         ))}
       </div>
 
+      <div className="mt-10 rounded-2xl border border-white/10 bg-white/5 p-5">
+        <h2 className="font-semibold text-white">Not on Morbin yet?</h2>
+        <p className="mt-1 text-sm text-neutral-400">
+          Apply to sell tickets for your organisation. A person reviews every application.
+        </p>
+        <Link href="/apply" className="mt-3 inline-block text-sm font-semibold text-white underline underline-offset-4">
+          List your event
+        </Link>
+      </div>
+
       <LegalFooter
         links={[
           { href: "/", label: "Home" },
+          { href: "/apply", label: "List your event" },
           { href: "/legal/privacy", label: "Privacy Policy" },
           { href: "/legal/terms", label: "Terms & Conditions" },
         ]}

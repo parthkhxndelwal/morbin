@@ -1,4 +1,4 @@
-import { FileTextIcon, SheetIcon } from "lucide-react";
+import { FileTextIcon, ReceiptTextIcon, SheetIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
@@ -67,6 +67,12 @@ export function PayoutSummary({ payout }: { payout: PayoutDetail }) {
               <Button variant="outline" size="sm" nativeButton={false} render={<a href={`/api/documents/${payout.breakdownDocId}`} />}>
                 <SheetIcon data-icon="inline-start" />
                 Line items (CSV)
+              </Button>
+            )}
+            {payout.invoiceDocId && (
+              <Button variant="outline" size="sm" nativeButton={false} render={<a href={`/api/documents/${payout.invoiceDocId}`} />}>
+                <ReceiptTextIcon data-icon="inline-start" />
+                Invoice (PDF)
               </Button>
             )}
           </div>

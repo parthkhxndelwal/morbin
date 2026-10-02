@@ -196,11 +196,26 @@ function invoicePage(doc: PDFDocument, fonts: Fonts, inv: Invoice) {
   y -= 20;
   text(page, fonts.regular, "BILLED TO", MARGIN, y, 9, MUTED);
   y -= 16;
-  text(page, fonts.bold, inv.recipient.name, MARGIN, y, 11);
+  const r = inv.recipient;
+  text(page, fonts.bold, r.name, MARGIN, y, 11);
   y -= 14;
-  text(page, fonts.regular, inv.recipient.email, MARGIN, y, 10);
-  y -= 14;
-  text(page, fonts.regular, "Unregistered (no GSTIN)", MARGIN, y, 10, MUTED);
+  for (const line of r.address ? wrap(fonts.regular, r.address, 10, 300, 3) : []) {
+    text(page, fonts.regular, line, MARGIN, y, 10);
+    y -= 14;
+  }
+  if (r.email) {
+    text(page, fonts.regular, r.email, MARGIN, y, 10);
+    y -= 14;
+  }
+  if (r.gstin) {
+    text(page, fonts.regular, `GSTIN: ${r.gstin}`, MARGIN, y, 10);
+  } else {
+    text(page, fonts.regular, "Unregistered (no GSTIN)", MARGIN, y, 10, MUTED);
+  }
+  if (r.state && r.stateCode) {
+    y -= 14;
+    text(page, fonts.regular, `State: ${r.state} (${r.stateCode})`, MARGIN, y, 10);
+  }
   y -= 30;
 
   // Line items.

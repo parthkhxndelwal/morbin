@@ -7,39 +7,46 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-npm run dev              # next dev
-npm run build            # next build
+npm run dev              # next dev (background jobs are off unless MORBIN_SCHEDULER=1)
+npm run build            # next build (output: "standalone")
 npm run lint             # eslint
-npm run preview          # opennextjs-cloudflare build + local preview
-npm run deploy           # opennextjs-cloudflare build + deploy to Cloudflare Workers
-npm run cf-typegen       # regenerate cloudflare-env.d.ts
 
-npm run db:indexes       # create Mongo indexes (never done at import; run post-deploy)
-npm run db:migrate       # migrate user roles
-npm run admin:bootstrap  # promote/create admin accounts from ADMIN_EMAILS
-npm run test:flow        # end-to-end checkout flow script
+npm run seed:dev-owner   # test accounts owner@/member@/admin@morbin.test (test/dev DBs only; reads .env.local)
+npm run admin:bootstrap  # promote/create admin accounts from ADMIN_EMAILS (reads .env.local if present)
+npm run db:indexes       # create Mongo indexes (also done by the scheduler at boot)
+npm run db:migrate       # one-off migration of user roles
 ```
 
-There is no test runner. "Tests" are standalone Node scripts run with `--experimental-strip-types`, which is why the pure-logic modules (`lib/flow-rules.ts`, `lib/admin-bootstrap-plan.ts`, `lib/admin-delete-plan.ts`) are kept free of DB imports so scripts can import them:
+`db:indexes` and `db:migrate` read `MONGODB_URI` / `MORBIN_DB` from the environment only (e.g. `node --env-file=.env.local …`). In production the server itself bootstraps admins and indexes at start.
+
+There is no test runner. Checks are standalone scripts; pure-logic modules are kept free of DB imports so the scripts can import them:
 
 ```bash
+npm run test:flow            # scripts/test-flow.ts — booking-rules evaluator (lib/flow-rules.ts)
+npm run check:pricing        # lib/pricing.check.mts
+npm run check:invoice        # lib/invoice-rules.check.mts (WRITE_SAMPLE=out.pdf writes a sample PDF)
 npm run check:bootstrap      # lib/admin-bootstrap.check.mts
 npm run check:delete-plan    # lib/admin-delete-plan.check.mts
-npm run check:force-delete   # scripts/check-force-delete.mjs
+npm run check:money          # scripts/check-money.mts — integration, needs Mongo + .env.local
+npm run check:force-delete   # scripts/check-force-delete.mjs — needs `npm run dev` running
 ```
 
-Env vars are documented in `.env.example` (copy to `.env.local`).
+Deployment is `scripts/deploy.sh` (ships `git archive HEAD` to the server, builds, health-checks, rolls back); see `docs/DEPLOYMENT.md`. Env vars are documented in `.env.example`; for local work copy the relevant ones to `.env.local` with `MORBIN_DB=test_morbin_db`.
 
 ## Architecture
 
-Event-ticketing platform: Next.js (App Router) + MongoDB + Auth.js + Razorpay + AWS SES, deployed to Cloudflare Workers via `@opennextjs/cloudflare`. Two Workers: `wrangler.jsonc` (prod, `morbin.space`, DB `morbin_db`) and `wrangler.dev.jsonc` (`dev.morbin.space` / `test.morbin.space`, DB `test_morbin_db`). The DB name comes from the `MORBIN_DB` var. Uploaded media is stored on local disk under `MEDIA_DIR` (`lib/media.ts`) and served by `app/media/[...key]`; Cloudflare R2 is no longer used. Self-hosted Docker deployment is replacing Workers — see `docs/REVAMP_PLAN.md` and `docs/DEPLOYMENT.md`.
+Event-ticketing platform: Next.js 16 (App Router) + MongoDB + Auth.js + Razorpay + Amazon SES. It runs as a **single Node process** in Docker (`Dockerfile`, `docker-compose.yml`) behind Caddy (`deploy/Caddyfile`, TLS via Let's Encrypt, or the optional Cloudflare tunnel in `docker-compose.tunnel.yml`), with MongoDB as a single-node replica set and an encrypted `backup` container. All personal data stays on that one server; SES and Razorpay are the only processors.
 
-- **Next.js here is a newer version with breaking changes** (see AGENTS.md): auth gate is `proxy.ts` (not `middleware.ts`); read `node_modules/next/dist/docs/` before using Next APIs.
-- **Auth** is split: `lib/auth.config.ts` is edge-safe (no DB, JWT sessions) and used by `proxy.ts`; `lib/auth.ts` adds providers and the Mongo adapter. `proxy.ts` is only a UX redirect for `/dashboard`; real authorization happens in layouts/pages/routes via `lib/guards.ts` (`requireOrgSession`, admin guards).
-- **Roles/permissions**: users are `ADMIN` or regular; orgs have `OWNER`/`MEMBER` memberships (`memberships` collection). All capability checks go through `lib/permissions.ts` (`can(role, capability)`). Admin status is the `role` field on the user doc; `ADMIN_EMAILS` only lists who may be promoted. `instrumentation.ts` runs `ensureBootstrapAdmin` at server start with a short deadline and swallows failures (fails closed: no admin).
-- **Data layer**: `lib/db.ts` exposes `getDb()` with a shared client on `globalThis`. `_id` is an ObjectId but referenced as strings elsewhere; use `toObjectId`/`safeObjectIds`. Domain modules in `lib/` (`events`, `organizations`, `orders`, `tickets`, `admin`, …) wrap collections; shared types in `lib/types.ts`.
-- **Checkout funnel**: durable server-side state in `lib/checkout.ts` (`CheckoutSession`, tokens stored only as hashes, httpOnly resume cookie `morbin_cs`, emailed magic links/OTP with attempt limits and resend cooldown). Per-event configurable flows (`lib/flows.ts` persistence, `lib/flow-rules.ts` pure rules, published vs DRAFT versions, `permissiveFlow` fallback). API under `app/api/checkout/*`; UI is `app/event/[slug]/buy-drawer.tsx` and `app/checkout/verify`.
-- **Payments → tickets**: `lib/razorpay.ts` + `app/api/razorpay/webhook`; `lib/fulfillment.ts` builds tickets (idempotent), signs QR payloads (`lib/tickets.ts`), and queues emails flushed by `app/api/cron/flush-emails`. Check-in scanning at `app/dashboard/scan` / `app/api/tickets/verify`.
-- **Route areas**: public `app/event/[slug]` (+ `/tickets` lookup), organizer `app/dashboard` (events, appearance/branding, flow, insights, scan), platform admin `app/dashboard/admin`, docs `app/docs`, legal `app/legal`. Per-event branding in `lib/branding.ts`.
-- UI uses Tailwind v4 + shadcn (`components.json`, `components/ui`), lucide-react. Path alias `@/`.
-- `graphify-out/` is a generated code knowledge graph (`GRAPH_REPORT.md` gives an overview); `.opencode/` and `opencode.json` are OpenCode tooling config.
+- **Next.js here has breaking changes** (see AGENTS.md): the auth gate is `proxy.ts` (not `middleware.ts`); read `node_modules/next/dist/docs/` before using Next APIs.
+- **Background jobs**: `lib/scheduler.ts`, started from `instrumentation.ts` in production (or with `MORBIN_SCHEDULER=1`), runs timer jobs in-process (expire stale orders, flush the email queue, ensure indexes). There is no cron endpoint.
+- **Storage**: MongoDB via `getDb()` (`lib/db.ts`; new indexes go in `ensureIndexes`). Multi-document writes use `withTransaction` (`lib/tx.ts`). `_id` is an ObjectId but referenced as strings elsewhere; use `toObjectId`/`safeObjectIds`. Public media lives on disk under `MEDIA_DIR` (`lib/media.ts`, served by `app/media/[...key]`); private documents (statements, ticket PDFs) under `DOCUMENTS_DIR` (`lib/documents.ts`, served only through `app/api/documents/[id]` after an access check).
+- **Auth**: `lib/auth.config.ts` is edge-safe (JWT sessions) and used by `proxy.ts`, which is only a UX redirect; `lib/auth.ts` adds providers and the Mongo adapter. Platform admin is the `role` field on the user; `instrumentation.ts` runs `ensureBootstrapAdmin` with a short deadline and fails closed.
+- **Authorization**: every capability check goes through `can(role, capability)` in `lib/permissions.ts`. Roles are `OWNER`, `MEMBER` and `SUPPORT` (a Morbin admin working on one org's event; `lib/support.ts`, `lib/event-access.ts`). Page guards: `requireOrgSession()` (`lib/guards.ts`), `requireEventAccess()` / `eventApiAccess()` (`lib/event-access.ts`), `requireAdmin()` (`lib/admin.ts`). Action guards: `orgActor(capability)` and `eventEditor(eventId)` (`lib/action-guards.ts`). Server actions re-authorise on every call.
+- **Server actions** return `Result<T>` from `lib/result.ts` (`ok()` / `err(message, fieldErrors)`) and never throw to the client. Client components get plain DTOs (ISO strings, string ids), never Mongo documents.
+- **Components**: shadcn (base-nova on Base UI) in `components/ui`; generic patterns that consume `Result` in `components/patterns` (`FormDialog`, `ActionForm`, `ConfirmAction`, `PromptAction`, `DataTable`, `Money`, `StatusBadge`); domain components and their actions in `components/features/<area>`. Pages stay thin; business rules live in `lib/` modules marked `import "server-only"`. Tailwind v4, lucide-react, path alias `@/`.
+- **Money**: integer paise everywhere; pricing only from `computePricing` (`lib/pricing.ts`), frozen on orders. Organisation balances are derived from the append-only ledger (`lib/ledger.ts`); payouts in `lib/payouts.ts`; GST invoices in `lib/invoices.ts` / `lib/invoice-rules.ts`.
+- **Checkout funnel**: durable server-side state in `lib/checkout.ts` (hashed tokens, httpOnly resume cookie `morbin_cs`, magic links/OTP with attempt limits). Per-event booking rules: `lib/flows.ts` (published vs draft versions) and the pure `lib/flow-rules.ts`. API under `app/api/checkout/*`; UI in `app/event/[slug]/buy-drawer.tsx` and `app/checkout/verify`.
+- **Payments → tickets**: `lib/razorpay.ts` + `app/api/razorpay/webhook`; `lib/fulfillment.ts` issues tickets idempotently, signs QR payloads (`lib/tickets.ts`), and queues emails that the scheduler flushes (`lib/email.ts`). Check-in at `app/dashboard/scan` / `app/api/tickets/verify`.
+- **Audit**: `audit()` and `notify()` in `lib/audit.ts`. Audit meta and logs never contain personal data.
+- **Route areas**: public `app/event/[slug]` (+ `/tickets`), `/apply`, organiser `app/dashboard`, platform admin `app/dashboard/admin`, docs `app/docs`, legal `app/legal`.
+- `docs/REVAMP_PLAN.md` holds the product plan; `graphify-out/` is a generated code knowledge graph; `.opencode/` and `opencode.json` are OpenCode tooling config.
