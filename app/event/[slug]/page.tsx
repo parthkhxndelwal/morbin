@@ -3,7 +3,10 @@ import { notFound } from "next/navigation";
 import { Logo } from "@/components/logo";
 import type { Metadata } from "next";
 import { getBranding } from "@/lib/branding";
+import { getDb } from "@/lib/db";
 import { getPublishedEventBySlug } from "@/lib/events";
+import { verifyTestRun } from "@/lib/test-run";
+import type { Event, TicketType } from "@/lib/types";
 import { getActiveFlow } from "@/lib/flows";
 import { mediaUrl } from "@/lib/media";
 import { BuyDrawer } from "./buy-drawer";
@@ -59,8 +62,12 @@ export default async function EventPage({
 }) {
   const { slug } = await params;
   const query = await searchParams;
-  const data = await getPublishedEventBySlug(slug);
+  // A builder test run may open a draft event; anyone else sees published ones.
+  const testToken = first(query.test) ?? null;
+  const test = verifyTestRun(testToken);
+  const data = (await getPublishedEventBySlug(slug)) ?? (test ? await draftForTest(slug, test.eventId) : null);
   if (!data) notFound();
+  if (test && test.eventId !== data.event._id!.toString()) notFound();
   const { event, ticketTypes } = data;
   const eventId = event._id!.toString();
 
@@ -116,8 +123,15 @@ export default async function EventPage({
           </p>
         )}
 
+        {test && (
+          <p className="mt-8 rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+            Test run with your draft booking rules. Nothing is charged, no seats are held and no emails are sent.
+          </p>
+        )}
+
         <div className="mt-8">
           <BuyDrawer
+            testToken={test ? testToken : null}
             eventId={eventId}
             slug={event.slug}
             title={event.title}
@@ -153,4 +167,13 @@ function first(v: string | string[] | undefined): string | undefined {
 /** R2 objects are served from the public media domain. */
 function bannerUrl(key: string): string {
   return mediaUrl(key);
+}
+
+/** For a valid test run only: the event by slug even while it's a draft. */
+async function draftForTest(slug: string, eventId: string): Promise<{ event: Event; ticketTypes: TicketType[] } | null> {
+  const db = await getDb();
+  const event = await db.collection<Event>("events").findOne({ slug, status: "DRAFT" });
+  if (!event?._id || event._id.toString() !== eventId) return null;
+  const ticketTypes = await db.collection<TicketType>("ticketTypes").find({ eventId }).sort({ pricePaise: 1 }).toArray();
+  return { event, ticketTypes };
 }

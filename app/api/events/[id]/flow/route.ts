@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getActiveFlow, getFlowDraft, publishFlow, saveFlowDraft } from "@/lib/flows";
+import { discardFlowDraft, getActiveFlow, getFlowDraft, publishFlow, saveFlowDraft } from "@/lib/flows";
 import { eventApiAccess } from "@/lib/event-access";
+import { diffFlows, summariseDiff } from "@/lib/flow-diff";
 import { lookupProblems } from "@/lib/lookups";
 import { can } from "@/lib/permissions";
 import { recordSupportChange, supportNeedsApproval } from "@/lib/support";
@@ -135,22 +136,48 @@ export async function PUT(
   // With the owner's approval switch on, support prepares and the owner publishes.
   const proposed = access.support && !!parsed.data.publish && supportNeedsApproval(access.org);
   const publish = !!parsed.data.publish && !proposed;
+  const before = access.support ? await getActiveFlow(eventId) : null;
+  const by = { userId: access.userId, as: access.support ? ("SUPPORT" as const) : ("OWNER" as const) };
   const flow = publish
-    ? await publishFlow(eventId, parsed.data.steps)
-    : await saveFlowDraft(eventId, parsed.data.steps);
+    ? await publishFlow(eventId, parsed.data.steps, by)
+    : await saveFlowDraft(eventId, parsed.data.steps, by);
 
   if (access.support) {
+    const changed = summariseDiff(diffFlows(before!.steps, parsed.data.steps as FlowStep[]));
     await recordSupportChange({
       adminId: access.userId,
       organizationId: access.org._id.toString(),
       eventId,
       action: publish ? "event.flow.published" : "event.flow.draft_saved",
       summary: proposed
-        ? `Booking rules for "${access.event.title}" were prepared for you. Review and publish them under Booking rules.`
+        ? `Booking rules for "${access.event.title}" were prepared for you (${changed}). Review and publish them under Booking rules.`
         : publish
-          ? `Booking rules for "${access.event.title}" were changed and published.`
-          : `A draft of the booking rules for "${access.event.title}" was saved.`,
+          ? `Booking rules for "${access.event.title}" were changed and published: ${changed}.`
+          : `A draft of the booking rules for "${access.event.title}" was saved (${changed}).`,
     });
   }
   return NextResponse.json({ flow, published: publish, proposed });
+}
+
+/** DELETE — discard the draft (e.g. a support proposal the owner rejects). */
+export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const r = await eventApiAccess(id);
+  if ("error" in r) return NextResponse.json({ error: r.error }, { status: r.status });
+  const { access } = r;
+  if (!can(access.role, "manageEvents")) {
+    return NextResponse.json({ error: "Only the owner can change who can book" }, { status: 403 });
+  }
+  const eventId = access.event._id.toString();
+  const discarded = await discardFlowDraft(eventId);
+  if (access.support && discarded) {
+    await recordSupportChange({
+      adminId: access.userId,
+      organizationId: access.org._id.toString(),
+      eventId,
+      action: "event.flow.draft_discarded",
+      summary: `The draft booking rules for "${access.event.title}" were discarded.`,
+    });
+  }
+  return NextResponse.json({ discarded });
 }

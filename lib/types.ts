@@ -494,6 +494,12 @@ export interface CheckoutFlow {
   /** DRAFT is the single working copy (version 0); RETIRED is a superseded publish, kept for history. */
   status: "DRAFT" | "PUBLISHED" | "RETIRED";
   steps: FlowStep[];
+  /** Who published this version, and as what. Absent on versions from before attribution. */
+  publishedBy?: string | null;
+  publishedAs?: "OWNER" | "SUPPORT" | null;
+  /** DRAFT only: who last saved it. A SUPPORT draft is a proposal the owner reviews. */
+  savedBy?: string | null;
+  savedAs?: "OWNER" | "SUPPORT" | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -586,6 +592,12 @@ export interface CheckoutSession {
   orderId: string | null;
   /** UTM captured on arrival, so a QR-code campaign is finally attributable. */
   utm: { source: string | null; medium: string | null; campaign: string | null };
+  /**
+   * A test run started from the booking-rules builder: it follows `testFlow`
+   * (the draft) and can never create an order, hold seats or send email.
+   */
+  test?: boolean;
+  testFlow?: { version: number; steps: FlowStep[] } | null;
   createdAt: Date;
   updatedAt: Date;
   expiresAt: Date;

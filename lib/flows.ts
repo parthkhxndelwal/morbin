@@ -1,5 +1,11 @@
-import { getDb } from "@/lib/db";
-import type { CheckoutFlow, FlowStep } from "@/lib/types";
+import { getDb, safeObjectIds } from "@/lib/db";
+import type { CheckoutFlow, FlowStep, User } from "@/lib/types";
+
+/** Who saved or published, and in what capacity. */
+export interface FlowActor {
+  userId: string;
+  as: "OWNER" | "SUPPORT";
+}
 
 /**
  * Reading and writing flow documents.
@@ -55,7 +61,7 @@ export async function createFlow(flow: CheckoutFlow): Promise<CheckoutFlow> {
  * pinned version is no longer live. Editing the live document would invalidate
  * exactly those buyers, mid-checkout.
  */
-export async function publishFlow(eventId: string, steps: FlowStep[]): Promise<CheckoutFlow> {
+export async function publishFlow(eventId: string, steps: FlowStep[], by: FlowActor): Promise<CheckoutFlow> {
   const db = await getDb();
   const latest = await db
     .collection<CheckoutFlow>("checkoutFlows")
@@ -70,6 +76,8 @@ export async function publishFlow(eventId: string, steps: FlowStep[]): Promise<C
     version,
     status: "PUBLISHED",
     steps,
+    publishedBy: by.userId,
+    publishedAs: by.as,
     createdAt: now,
     updatedAt: now,
   };
@@ -88,7 +96,7 @@ export async function publishFlow(eventId: string, steps: FlowStep[]): Promise<C
 }
 
 /** Save the working copy without touching what buyers are sold against. */
-export async function saveFlowDraft(eventId: string, steps: FlowStep[]): Promise<CheckoutFlow> {
+export async function saveFlowDraft(eventId: string, steps: FlowStep[], by: FlowActor): Promise<CheckoutFlow> {
   const db = await getDb();
   const existing = await db
     .collection<CheckoutFlow>("checkoutFlows")
@@ -97,17 +105,63 @@ export async function saveFlowDraft(eventId: string, steps: FlowStep[]): Promise
   if (existing) {
     await db
       .collection<CheckoutFlow>("checkoutFlows")
-      .updateOne({ _id: existing._id }, { $set: { steps, updatedAt: now } });
-    return { ...existing, steps, updatedAt: now };
+      .updateOne({ _id: existing._id }, { $set: { steps, savedBy: by.userId, savedAs: by.as, updatedAt: now } });
+    return { ...existing, steps, savedBy: by.userId, savedAs: by.as, updatedAt: now };
   }
   const draft: CheckoutFlow = {
     eventId,
     version: 0,
     status: "DRAFT",
     steps,
+    savedBy: by.userId,
+    savedAs: by.as,
     createdAt: now,
     updatedAt: now,
   };
   await db.collection<CheckoutFlow>("checkoutFlows").insertOne(draft);
   return draft;
+}
+
+/** Throw away the working copy (e.g. the owner discards a support proposal). Live rules are untouched. */
+export async function discardFlowDraft(eventId: string): Promise<boolean> {
+  const db = await getDb();
+  const r = await db.collection<CheckoutFlow>("checkoutFlows").deleteMany({ eventId, ...DRAFT_FILTER });
+  return r.deletedCount > 0;
+}
+
+export interface FlowVersionView {
+  version: number;
+  live: boolean;
+  publishedAt: string;
+  publishedAs: "OWNER" | "SUPPORT" | null;
+  publishedByName: string | null;
+  steps: FlowStep[];
+}
+
+/**
+ * Every published version of an event's rules, newest first, with who
+ * published it. Retired versions are never modified; restoring one copies its
+ * steps into the editor as unsaved changes.
+ */
+export async function listFlowVersions(eventId: string, limit = 50): Promise<FlowVersionView[]> {
+  const db = await getDb();
+  const flows = await db
+    .collection<CheckoutFlow>("checkoutFlows")
+    .find({ eventId, status: { $in: ["PUBLISHED", "RETIRED"] } })
+    .sort({ version: -1 })
+    .limit(limit)
+    .toArray();
+  const ids = [...new Set(flows.map((f) => f.publishedBy).filter((x): x is string => !!x))];
+  const users = ids.length
+    ? await db.collection<User>("users").find({ _id: { $in: safeObjectIds(ids) } }, { projection: { name: 1, email: 1 } }).toArray()
+    : [];
+  const names = new Map(users.map((u) => [u._id!.toString(), u.name || u.email]));
+  return flows.map((f) => ({
+    version: f.version,
+    live: f.status === "PUBLISHED",
+    publishedAt: f.createdAt.toISOString(),
+    publishedAs: f.publishedAs ?? null,
+    publishedByName: f.publishedBy ? (names.get(f.publishedBy) ?? null) : null,
+    steps: f.steps,
+  }));
 }

@@ -70,6 +70,8 @@ interface State {
     platformFeePaise: number;
   };
   branding: { accentColor: string; ctaLabel: string; customFields: CustomField[] };
+  /** A builder test run: stop at the payment step. */
+  testRun?: boolean;
 }
 
 type ScreenKind = "loading" | "questions" | "identity" | "checkout" | "done";
@@ -99,7 +101,10 @@ export function BuyDrawer({
   ctaLabel,
   utm,
   autoOpen = false,
+  testToken = null,
 }: {
+  /** Signed by "Run through checkout as a buyer"; opens a test-mode checkout with the draft rules. */
+  testToken?: string | null;
   eventId: string;
   slug: string;
   title: string;
@@ -146,6 +151,7 @@ export function BuyDrawer({
           utm_source: utm?.source,
           utm_medium: utm?.medium,
           utm_campaign: utm?.campaign,
+          ...(testToken ? { testToken } : {}),
         }),
       });
       if (!next.ok) {
@@ -159,7 +165,7 @@ export function BuyDrawer({
     } catch {
       setError("Something went wrong. Please try again.");
     }
-  }, [eventId, utm]);
+  }, [eventId, utm, testToken]);
 
   /**
    * Pick the screen from the resolved state. Kept as one function so every
@@ -311,6 +317,12 @@ export function BuyDrawer({
       body: JSON.stringify(address ? { email: address } : {}),
     });
     const body = await res.json().catch(() => ({}));
+    // A test run confirms the address without sending anything.
+    if (res.ok && body.testVerified) {
+      const s = await read();
+      if (s) apply(s);
+      return;
+    }
     // 202 either way: the response never reveals whether the address qualifies.
     if (res.status === 202) {
       setLinkSent(true);
@@ -599,6 +611,17 @@ export function BuyDrawer({
               </div>
             )}
 
+            {state.testRun ? (
+              <div className="mt-5 rounded-xl border border-amber-400/30 bg-amber-500/10 p-4 text-sm text-amber-100">
+                <p className="font-semibold">This is where the buyer would pay</p>
+                <p className="mt-1 text-amber-100/80">
+                  {totalQty > 0 || state.offer.forcedItems
+                    ? `They'd pay for ${state.offer.forcedItems ? 1 : totalQty} ticket${(state.offer.forcedItems ? 1 : totalQty) === 1 ? "" : "s"} and get them by email.`
+                    : "They'd choose tickets here first."}{" "}
+                  Test runs never create orders, hold seats or send email.
+                </p>
+              </div>
+            ) : (
             <button
               onClick={pay}
               disabled={paying || totalQty === 0 || state.offer.soldOutForIdentity}
@@ -613,6 +636,7 @@ export function BuyDrawer({
                     ? "Select tickets"
                     : `Continue to payment · ₹${(total / 100).toFixed(0)}`}
             </button>
+            )}
           </>
         )}
 

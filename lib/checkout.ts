@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { getDb } from "@/lib/db";
-import type { CheckoutSession, Order, Ticket } from "@/lib/types";
+import type { CheckoutFlow, CheckoutSession, Order, Ticket } from "@/lib/types";
 
 /**
  * Durable state for the checkout funnel.
@@ -56,6 +56,8 @@ export async function createCheckoutSession(input: {
   eventId: string;
   flowVersion: number;
   utm?: { source?: string | null; medium?: string | null; campaign?: string | null };
+  /** A builder test run: these rules instead of the published ones. */
+  testFlow?: CheckoutSession["testFlow"];
 }): Promise<CheckoutSession> {
   const db = await getDb();
   const now = new Date();
@@ -80,6 +82,7 @@ export async function createCheckoutSession(input: {
       medium: input.utm?.medium ?? null,
       campaign: input.utm?.campaign ?? null,
     },
+    ...(input.testFlow ? { test: true, testFlow: input.testFlow } : {}),
     createdAt: now,
     updatedAt: now,
     expiresAt: sessionExpiry(now),
@@ -408,4 +411,17 @@ export async function branchBreakdown(
       revenue: r.revenue,
     })),
   );
+}
+
+/**
+ * The rules a session follows: its frozen test-run copy for a builder test
+ * run, otherwise the event's published flow.
+ */
+export async function flowForSession(session: Pick<CheckoutSession, "eventId" | "test" | "testFlow">): Promise<CheckoutFlow> {
+  if (session.test && session.testFlow) {
+    const now = new Date();
+    return { eventId: session.eventId, version: session.testFlow.version, status: "DRAFT", steps: session.testFlow.steps, createdAt: now, updatedAt: now };
+  }
+  const { getActiveFlow } = await import("@/lib/flows");
+  return getActiveFlow(session.eventId);
 }

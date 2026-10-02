@@ -48,6 +48,14 @@ export async function POST() {
       { status: 410 },
     );
   }
+  // A builder test run never takes money or holds seats — enforced here, not
+  // just by the drawer hiding the button.
+  if (session.test) {
+    return NextResponse.json(
+      { error: "This is a test run. This is where the buyer would pay.", testRun: true },
+      { status: 403 },
+    );
+  }
   if (session.orderId) {
     return NextResponse.json(
       { error: "This order has already been created" },

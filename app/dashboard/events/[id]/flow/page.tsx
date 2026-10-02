@@ -2,7 +2,7 @@ import { NoAccessState } from "@/components/patterns/states";
 import { getBranding } from "@/lib/branding";
 import { datasetsForBuilder } from "@/lib/datasets";
 import { getTicketTypes } from "@/lib/events";
-import { getActiveFlow, getFlowDraft, MAX_PER_TYPE_PER_ORDER } from "@/lib/flows";
+import { getActiveFlow, getFlowDraft, listFlowVersions, MAX_PER_TYPE_PER_ORDER } from "@/lib/flows";
 import { requireEventAccess } from "@/lib/event-access";
 import { can } from "@/lib/permissions";
 import { supportNeedsApproval } from "@/lib/support";
@@ -25,12 +25,13 @@ export default async function FlowBuilderPage({ params }: { params: Promise<{ id
     return <NoAccessState description="Only the organisation owner can change who can book." />;
   }
 
-  const [ticketTypes, branding, published, draft, datasets] = await Promise.all([
+  const [ticketTypes, branding, published, draft, datasets, versions] = await Promise.all([
     getTicketTypes(eventId),
     getBranding(eventId),
     getActiveFlow(eventId),
     getFlowDraft(eventId),
     datasetsForBuilder(org._id.toString()),
+    listFlowVersions(eventId),
   ]);
 
   return (
@@ -54,7 +55,9 @@ export default async function FlowBuilderPage({ params }: { params: Promise<{ id
         required: f.required,
       }))}
       published={{ version: published.version, steps: published.steps }}
-      draft={draft ? { steps: draft.steps } : null}
+      draft={draft ? { steps: draft.steps, savedAs: draft.savedAs ?? null } : null}
+      versions={versions}
+      viewerIsSupport={support}
       eventStatus={event.status}
       datasets={datasets.map((d) => ({ id: d.id, name: d.name, columns: d.columns, keyColumn: d.keyColumn, sample: d.sample }))}
       datasetsHref={support ? `/dashboard/admin/orgs/${org._id.toString()}/datasets` : "/dashboard/datasets"}
