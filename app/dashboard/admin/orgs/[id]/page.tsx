@@ -1,118 +1,136 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
-import { listOrganizations, requireAdmin } from "@/lib/admin";
-import { memberLabelPlural } from "@/lib/permissions";
-import { Members } from "./members";
+import {
+  AdminMembers,
+  DataCard,
+  FeeCard,
+  LedgerTable,
+  OrgHeaderActions,
+  OwnerCard,
+} from "@/components/features/admin/org-detail";
+import { IssuePayoutButton, PayoutAccountCard } from "@/components/features/payouts/admin-desk";
+import { PayoutsTable } from "@/components/features/payouts/payouts-table";
+import { BreadcrumbLabel } from "@/components/breadcrumb-labels";
+import { DateTime, Money } from "@/components/patterns/money";
+import { PageHeader } from "@/components/patterns/page-header";
+import { StatCard, StatGrid } from "@/components/patterns/stat-card";
+import { EmptyState } from "@/components/patterns/states";
+import { StatusBadge } from "@/components/patterns/status-badge";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { requireAdmin } from "@/lib/admin";
+import { getAdminOrgDetail } from "@/lib/admin-orgs";
+import { getPayoutRows } from "@/lib/dashboard-data";
+import { getTeam } from "@/lib/team";
 
-export const metadata = { title: "Organization" };
-
-const card = "rounded-2xl border border-white/10 bg-white/5 p-4";
+export const metadata = { title: "Organisation" };
 
 export default async function AdminOrgPage({ params }: { params: Promise<{ id: string }> }) {
-  // Same belt-and-braces gate as the list page: the layout redirect is UX
-  // only, so the data fetch itself is never reachable by a non-admin.
-  await requireAdmin();
+  const admin = await requireAdmin();
   const { id } = await params;
-
-  const rows = await listOrganizations();
-  const row = rows.find((r) => r.org.id === id);
-  if (!row) notFound();
-  const { org, owner, eventCount } = row;
+  const org = await getAdminOrgDetail(id);
+  if (!org) notFound();
+  const [payouts, team] = await Promise.all([getPayoutRows(id), getTeam(id, admin.id)]);
 
   return (
-    <div>
-      <Link href="/dashboard/admin" className="text-sm text-neutral-400 hover:text-white">
-        ← Organizations
-      </Link>
-
-      <div className="mt-2 flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">{org.name}</h1>
-          <p className="mt-1 text-sm text-neutral-400">
-            {org.type} · {org.memberCount} {memberLabelPlural(org.type)} · {eventCount} event
-            {eventCount === 1 ? "" : "s"} ·{" "}
-            {org.orderCount} order{org.orderCount === 1 ? "" : "s"} on record
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <span
-            className={`rounded-full px-3 py-1 text-xs font-bold ${
-              org.status === "SUSPENDED"
-                ? "bg-rose-500/20 text-rose-300"
-                : "bg-emerald-500/20 text-emerald-300"
-            }`}
-          >
-            {org.status}
-          </span>
-          <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-bold text-neutral-300">
-            {org.paymentAccountStatus}
-          </span>
-        </div>
-      </div>
+    <div className="space-y-6">
+      <BreadcrumbLabel segment={id} label={org.name} />
+      <PageHeader
+        title={org.name}
+        meta={
+          <>
+            <StatusBadge kind="organization" value={org.status} />
+            <StatusBadge kind="paymentAccount" value={org.paymentAccountStatus} />
+          </>
+        }
+        description={`${org.events.length} event${org.events.length === 1 ? "" : "s"} · ${team.members.length} ${team.members.length === 1 ? "person" : "people"}`}
+        actions={<OrgHeaderActions org={org} />}
+      />
 
       {org.status === "SUSPENDED" && (
-        <p className="mt-6 rounded-2xl border border-rose-400/30 bg-rose-500/10 p-4 text-sm text-rose-200">
-          This organization is suspended. It keeps every event, order and ticket, but cannot
-          publish or take new orders. Restore it from the{" "}
-          <Link href="/dashboard/admin" className="underline">
-            organization list
-          </Link>
-          .
-        </p>
+        <Alert variant="destructive">
+          <AlertTitle>Suspended</AlertTitle>
+          <AlertDescription>Tickets already sold still scan, but nothing can be published or sold.</AlertDescription>
+        </Alert>
       )}
 
-      <div className="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        <Detail label="Owner" value={owner?.email ?? "No owner on record"} />
-        <Detail label="Type" value={org.type} hint={org.type === "INSTITUTION" ? "Members are Students" : "Members are Staff"} />
-        <Detail label="Slug" value={org.slug} mono />
-        <Detail
-          label="Payouts"
-          value={org.payoutsEnabled ? "Enabled" : "Disabled"}
-          hint={org.payoutsEnabled ? undefined : "Only VERIFIED organizations can take money"}
-        />
-        <Detail
-          label="Created"
-          value={new Date(org.createdAt).toLocaleDateString("en-IN", {
-            day: "numeric",
-            month: "short",
-            year: "numeric",
-          })}
-        />
-      </div>
+      <Tabs defaultValue="overview">
+        <TabsList>
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="money">Money</TabsTrigger>
+          <TabsTrigger value="members">Members</TabsTrigger>
+          <TabsTrigger value="events">Events</TabsTrigger>
+        </TabsList>
 
-      <p className="mt-4 text-xs text-neutral-500">
-        Rename, re-point the Razorpay account and change the approval status from the{" "}
-        <Link href="/dashboard/admin" className="text-neutral-400 underline">
-          organization list
-        </Link>
-        . Deletion is refused while orders or members exist — suspend instead.
-      </p>
+        <TabsContent value="overview" className="mt-4 grid gap-4 lg:grid-cols-2">
+          <OwnerCard org={org} />
+          <div className="space-y-4">
+            <FeeCard org={org} />
+            <DataCard org={org} />
+          </div>
+        </TabsContent>
 
-      <div className="mt-10">
-        <Members organizationId={org.id} type={org.type} />
-      </div>
-    </div>
-  );
-}
+        <TabsContent value="money" className="mt-4 space-y-4">
+          <StatGrid>
+            <StatCard
+              label="Unpaid balance"
+              value={<Money paise={org.balance.unsettledPaise} />}
+              hint={org.balance.unsettledPaise > 0 ? <IssuePayoutButton organizationId={org.id} organizationName={org.name} /> : undefined}
+            />
+            <StatCard label="In a draft payout" value={<Money paise={org.balance.inDraftPaise} />} />
+            <StatCard label="Paid out" value={<Money paise={org.balance.paidOutPaise} />} />
+            <StatCard label="Fees earned (unsettled)" value={<Money paise={-org.balance.unsettled.feesPaise} />} />
+          </StatGrid>
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,24rem)]">
+            <Card>
+              <CardHeader>
+                <CardTitle>Latest ledger entries</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <LedgerTable org={org} />
+              </CardContent>
+            </Card>
+            <PayoutAccountCard organizationId={org.id} account={org.account} />
+          </div>
+          <PayoutsTable rows={payouts} basePath="/dashboard/admin/payouts" />
+        </TabsContent>
 
-function Detail({
-  label,
-  value,
-  hint,
-  mono,
-}: {
-  label: string;
-  value: string;
-  hint?: string;
-  mono?: boolean;
-}) {
-  return (
-    <div className={card}>
-      <p className="text-xs font-semibold uppercase tracking-widest text-neutral-400">{label}</p>
-      <p className={`mt-1.5 truncate text-sm ${mono ? "font-mono text-neutral-300" : "font-semibold"}`}>
-        {value}
-      </p>
-      {hint && <p className="mt-1 text-xs text-neutral-500">{hint}</p>}
+        <TabsContent value="members" className="mt-4">
+          <AdminMembers organizationId={org.id} members={team.members} invites={team.invites} />
+        </TabsContent>
+
+        <TabsContent value="events" className="mt-4">
+          {org.events.length === 0 ? (
+            <EmptyState title="No events yet" description="Events this organisation creates appear here." />
+          ) : (
+            <div className="overflow-x-auto rounded-lg border">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-muted/40 hover:bg-muted/40">
+                    <TableHead>Event</TableHead>
+                    <TableHead>Starts</TableHead>
+                    <TableHead>Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {org.events.map((e) => (
+                    <TableRow key={e.id}>
+                      <TableCell className="font-medium">{e.title}</TableCell>
+                      <TableCell>
+                        <DateTime value={e.startsAt} />
+                      </TableCell>
+                      <TableCell>
+                        <StatusBadge kind="event" value={e.status} />
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getInviteView } from "@/lib/team";
+import { acceptInviteAction } from "./actions";
 import { JoinForm } from "./join-form";
 
 export const metadata: Metadata = {
@@ -44,7 +45,7 @@ export default async function JoinPage({ searchParams }: { searchParams: Promise
               <CardDescription>Set up your Morbin account to see events and check tickets in.</CardDescription>
             </CardHeader>
             <CardContent>
-              <JoinForm token={token} email={invite.email} defaultName={invite.name ?? ""} />
+              <JoinForm token={token} email={invite.email} defaultName={invite.name ?? ""} action={acceptInviteAction} />
             </CardContent>
           </>
         ) : (

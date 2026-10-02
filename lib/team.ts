@@ -127,10 +127,11 @@ export async function getTeam(
 
 /* ── Inviting ────────────────────────────────────────────────────────────── */
 
+/** The organisation's owner, or a Morbin admin acting as support. */
 interface Actor {
   organizationId: string;
   userId: string;
-  role: OrgRole;
+  role: OrgRole | "ADMIN";
 }
 
 async function actorContext(actor: Actor) {
@@ -140,7 +141,9 @@ async function actorContext(actor: Actor) {
     db.collection<User>("users").findOne({ _id: toObjectId(actor.userId)! }, { projection: { name: 1, email: 1 } }),
   ]);
   if (!org) throw new TxAbort("Organisation not found.", 404);
-  return { db, org, inviterName: me?.name?.trim() || me?.email || "Your organisation's owner" };
+  const inviterName =
+    actor.role === "ADMIN" ? "Morbin support" : me?.name?.trim() || me?.email || "Your organisation's owner";
+  return { db, org, inviterName };
 }
 
 async function queueTeamEmail(

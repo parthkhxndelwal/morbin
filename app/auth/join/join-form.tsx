@@ -8,13 +8,25 @@ import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/c
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import type { Result } from "@/lib/result";
-import { acceptInviteAction } from "./actions";
 
 /**
- * Name + password for a new team member. On success the account exists, so it
- * signs straight in with what was just typed and lands on the dashboard.
+ * Name + password for an account someone else started (a team invite, or an
+ * organisation Morbin set up). On success it signs straight in with what was
+ * just typed and lands on the dashboard.
  */
-export function JoinForm({ token, email, defaultName }: { token: string; email: string; defaultName: string }) {
+export function JoinForm({
+  token,
+  email,
+  defaultName,
+  submitLabel = "Create account and join",
+  action,
+}: {
+  token: string;
+  email: string;
+  defaultName: string;
+  submitLabel?: string;
+  action: (token: string, formData: FormData) => Promise<Result<{ email: string }>>;
+}) {
   const router = useRouter();
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
@@ -28,7 +40,7 @@ export function JoinForm({ token, email, defaultName }: { token: string; email: 
     startTransition(async () => {
       let result: Result<{ email: string }>;
       try {
-        result = await acceptInviteAction(token, formData);
+        result = await action(token, formData);
       } catch {
         result = { ok: false, error: "Something went wrong. Please try again." };
       }
@@ -100,7 +112,7 @@ export function JoinForm({ token, email, defaultName }: { token: string; email: 
       )}
       <Button type="submit" disabled={pending}>
         {pending && <Spinner data-icon="inline-start" />}
-        Create account and join
+        {submitLabel}
       </Button>
     </form>
   );

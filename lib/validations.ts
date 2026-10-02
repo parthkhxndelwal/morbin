@@ -222,3 +222,39 @@ export const joinTeamSchema = z
     confirm: z.string(),
   })
   .refine((v) => v.password === v.confirm, { path: ["confirm"], message: "The passwords don't match" });
+
+const ORG_TYPES = ["EVENT", "INSTITUTION", "CORPORATE"] as const;
+const PAYMENT_STATUSES = ["NOT_STARTED", "PENDING", "VERIFIED", "REJECTED", "RESTRICTED"] as const;
+
+/** Admin creating an organisation for someone. */
+export const adminCreateOrgSchema = z.object({
+  name: z.string().trim().min(2, "At least 2 characters").max(120, "At most 120 characters"),
+  type: z.enum(ORG_TYPES, { error: "Choose a type" }),
+  ownerEmail: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .pipe(z.string().email("Enter a valid email address")),
+  ownerName: z.string().trim().max(80, "At most 80 characters"),
+});
+
+/** Admin editing an organisation's identity and payment status. */
+export const adminOrgBasicsSchema = z.object({
+  name: z.string().trim().min(2, "At least 2 characters").max(120, "At most 120 characters"),
+  type: z.enum(ORG_TYPES),
+  paymentAccountStatus: z.enum(PAYMENT_STATUSES),
+});
+
+/** A percentage typed by a person ("7", "7.5"), returned in basis points. Empty = platform default. */
+export const feePercentSchema = z.object({
+  fee: z
+    .string()
+    .trim()
+    .refine((v) => v === "" || /^\d{1,2}(\.\d{1,2})?$/.test(v), "Enter a percentage like 5 or 7.5")
+    .transform((v) => (v === "" ? null : Math.round(Number(v) * 100))),
+  note: z
+    .string()
+    .trim()
+    .max(300, "At most 300 characters")
+    .transform((v) => v || null),
+});

@@ -277,6 +277,17 @@ export async function flushEmailQueue(limit = 20): Promise<{ sent: number; faile
           arn: meta.refundArn ? esc(meta.refundArn) : null,
           speed: meta.refundSpeed ?? "NORMAL",
         });
+      } else if (job.kind === "ACCOUNT_SETUP") {
+        const organizationName = esc(meta.organizationName ?? "your organisation");
+        subject = `Set up your Morbin account for ${meta.organizationName ?? "your organisation"}`;
+        html = `<div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#111">
+          <h2 style="margin:0 0 16px">Welcome to Morbin</h2>
+          <p>Hi ${attendeeName},</p>
+          <p>${esc(meta.inviterName ?? "Morbin")} has set up <strong>${organizationName}</strong> on Morbin with you as its owner.
+             Choose a password to sign in and start creating events. This link works once and expires in 7 days.</p>
+          ${emailButton(esc(meta.link ?? appUrl("/auth")), "Choose a password")}
+          <p style="color:#777;font-size:12px;word-break:break-all">If the button does not work, paste this into your browser:<br>${esc(meta.link ?? "")}</p>
+        </div>`;
       } else if (job.kind === "TEAM_INVITE" || job.kind === "TEAM_ADDED") {
         const organizationName = meta.organizationName ?? "an organisation";
         subject =

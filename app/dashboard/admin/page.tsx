@@ -1,24 +1,32 @@
+import { NewOrganizationButton, OrgsTable } from "@/components/features/admin/orgs-table";
+import { PageHeader } from "@/components/patterns/page-header";
 import { listOrganizations, requireAdmin } from "@/lib/admin";
-import { AdminOrgs } from "./orgs";
 
-export const metadata = { title: "Organizations" };
+export const metadata = { title: "Organisations" };
 
-export default async function AdminPage() {
-  // The nested layout already gated on admin; re-checked here so the data
-  // fetch itself can never run for a non-admin.
+export default async function AdminOrganisationsPage() {
   await requireAdmin();
   const rows = await listOrganizations();
-
   return (
-    <div>
-      <h1 className="text-2xl font-bold tracking-tight">Organizations</h1>
-      <p className="mt-1 text-sm text-neutral-400">
-        Create organizations, verify them, approve them, and manage who belongs to
-        them.
-      </p>
-      <div className="mt-8">
-        <AdminOrgs initialRows={rows} />
-      </div>
+    <div className="space-y-6">
+      <PageHeader
+        title="Organisations"
+        description="Everyone selling tickets on Morbin. Open one to manage its fee, members, events and money."
+        actions={<NewOrganizationButton />}
+      />
+      <OrgsTable
+        rows={rows.map((r) => ({
+          id: r.org.id,
+          name: r.org.name,
+          type: r.org.type,
+          status: r.org.status,
+          paymentAccountStatus: r.org.paymentAccountStatus,
+          ownerEmail: r.owner?.email ?? null,
+          events: r.eventCount,
+          orders: r.org.orderCount,
+          createdAt: r.org.createdAt,
+        }))}
+      />
     </div>
   );
 }

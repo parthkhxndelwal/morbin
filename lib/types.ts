@@ -285,7 +285,9 @@ export type EmailKind =
   /** A new person invited to an organisation: carries a one-time join link. */
   | "TEAM_INVITE"
   /** An existing Morbin user added to an organisation. */
-  | "TEAM_ADDED";
+  | "TEAM_ADDED"
+  /** An account Morbin created for someone (e.g. a new organisation owner): choose a password. */
+  | "ACCOUNT_SETUP";
 
 export interface EmailRecord {
   _id?: ObjectId;
