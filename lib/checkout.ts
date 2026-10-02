@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import { getDb } from "@/lib/db";
 import type { CheckoutFlow, CheckoutSession, Order, Ticket } from "@/lib/types";
 
@@ -243,13 +243,26 @@ export async function setOrder(publicId: string, orderId: string): Promise<void>
  * Magic link
  * ──────────────────────────────────────────────────────────────────────────── */
 
-/** Mint a fresh emailed token, superseding any previous one. */
+/**
+ * The 6-digit code is bound to its session: hashed with the session id, so a
+ * code is only ever checked against the drawer it was sent to, never looked up.
+ */
+function codeHash(publicId: string, code: string): string {
+  return hashToken(`${publicId}:${code}`);
+}
+
+/**
+ * Mint a fresh emailed link and 6-digit code, superseding any previous ones.
+ * The buyer can type the code into the drawer without leaving it, or tap the
+ * link; either spends both.
+ */
 export async function issueOtp(
   publicId: string,
   email: string,
-): Promise<{ raw: string; resendAfter: Date }> {
+): Promise<{ raw: string; code: string; resendAfter: Date }> {
   const db = await getDb();
   const raw = randomToken();
+  const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
   const now = new Date();
   const resendAfter = new Date(now.getTime() + RESEND_COOLDOWN_MS);
   await db.collection<CheckoutSession>("checkoutSessions").updateOne(
@@ -257,6 +270,7 @@ export async function issueOtp(
     {
       $set: {
         otpTokenHash: hashToken(raw),
+        otpCodeHash: codeHash(publicId, code),
         otpExpiresAt: new Date(now.getTime() + OTP_TTL_MS),
         otpAttempts: 0,
         resendAfter,
@@ -266,7 +280,7 @@ export async function issueOtp(
       },
     },
   );
-  return { raw, resendAfter };
+  return { raw, code, resendAfter };
 }
 
 /** Remaining wait before another link may be sent, in seconds. */
@@ -317,6 +331,52 @@ export async function consumeOtp(raw: string): Promise<OtpResult> {
     {
       $set: {
         otpTokenHash: null,
+        otpCodeHash: null,
+        status: "IDENTITY_VERIFIED",
+        "identity.verifiedAt": now,
+        "identity.via": "EMAIL_OTP",
+        updatedAt: now,
+      },
+      $inc: { otpAttempts: 1 },
+    },
+    { returnDocument: "after" },
+  );
+  if (!result) return { ok: false, reason: "invalid" };
+  return { ok: true, session: result as CheckoutSession, email };
+}
+
+/**
+ * Check a typed code against this session's. Wrong codes count towards the
+ * same attempt limit as links; at the limit both are invalidated and the
+ * buyer must request a new email.
+ */
+export async function consumeOtpCode(publicId: string, code: string): Promise<OtpResult> {
+  const clean = code.replace(/\D/g, "");
+  if (clean.length !== 6) return { ok: false, reason: "invalid" };
+  const db = await getDb();
+  const sessions = db.collection<CheckoutSession>("checkoutSessions");
+  const session = await sessions.findOne({ publicId });
+  const now = new Date();
+  if (!session?.otpCodeHash) return { ok: false, reason: "invalid" };
+  if ((session.otpAttempts ?? 0) >= MAX_OTP_ATTEMPTS) {
+    await sessions.updateOne({ _id: session._id }, { $set: { otpTokenHash: null, otpCodeHash: null, updatedAt: now } });
+    return { ok: false, reason: "attempts" };
+  }
+  if (session.otpExpiresAt && session.otpExpiresAt < now) return { ok: false, reason: "expired" };
+  const expected = Buffer.from(session.otpCodeHash);
+  const given = Buffer.from(codeHash(publicId, clean));
+  if (expected.length !== given.length || !timingSafeEqual(expected, given)) {
+    await sessions.updateOne({ _id: session._id }, { $inc: { otpAttempts: 1 }, $set: { updatedAt: now } });
+    return { ok: false, reason: "invalid" };
+  }
+  const email = session.identity.email?.toLowerCase();
+  if (!email) return { ok: false, reason: "invalid" };
+  const result = await sessions.findOneAndUpdate(
+    { _id: session._id, otpCodeHash: session.otpCodeHash },
+    {
+      $set: {
+        otpTokenHash: null,
+        otpCodeHash: null,
         status: "IDENTITY_VERIFIED",
         "identity.verifiedAt": now,
         "identity.via": "EMAIL_OTP",

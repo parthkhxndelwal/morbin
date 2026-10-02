@@ -50,7 +50,7 @@ export interface CheckoutPricing {
 }
 
 export interface CheckoutState {
-  event: { id: string; slug: string; title: string; venue: string };
+  event: { id: string; slug: string; title: string; venue: string; startsAt: string; endsAt: string; timezone: string };
   flow: { version: number; steps: CheckoutStep[] };
   answers: Record<string, string>;
   branch: { stepId: string; optionId: string; value: string } | null;

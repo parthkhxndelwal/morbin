@@ -386,6 +386,8 @@ export interface EmailRecord {
     inviterName?: string;
     /** A link carrying a secret (join token). Cleared once the email is sent. */
     link?: string | null;
+    /** FLOW_MAGIC_LINK: the 6-digit code. Cleared once the email is sent. */
+    otpCode?: string | null;
     /** APPLICATION: which update this is, and Morbin's message if any. */
     applicationStage?: "RECEIVED" | "INFO_REQUESTED" | "APPROVED" | "REJECTED";
     message?: string | null;
@@ -580,6 +582,8 @@ export interface CheckoutSession {
   };
   /** sha256 of the emailed link. Cleared the moment it is consumed. */
   otpTokenHash?: string | null;
+  /** sha256 of "<publicId>:<6-digit code>", the same email's in-drawer alternative to the link. */
+  otpCodeHash?: string | null;
   otpExpiresAt?: Date | null;
   otpAttempts: number;
   resendAfter?: Date | null;
