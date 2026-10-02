@@ -68,3 +68,89 @@ export function amountInWords(paise: number): string {
   const words = parts.join(" ") || "Zero";
   return `Rupees ${words}${p ? ` and Paise ${belowHundred(p)}` : ""} Only`;
 }
+
+/**
+ * GST state codes (the first two digits of a GSTIN), for place of supply.
+ * Includes union territories and the "Other Territory" / "Centre
+ * Jurisdiction" codes the GST portal uses.
+ */
+export const GST_STATES: readonly { code: string; name: string }[] = [
+  { code: "01", name: "Jammu and Kashmir" },
+  { code: "02", name: "Himachal Pradesh" },
+  { code: "03", name: "Punjab" },
+  { code: "04", name: "Chandigarh" },
+  { code: "05", name: "Uttarakhand" },
+  { code: "06", name: "Haryana" },
+  { code: "07", name: "Delhi" },
+  { code: "08", name: "Rajasthan" },
+  { code: "09", name: "Uttar Pradesh" },
+  { code: "10", name: "Bihar" },
+  { code: "11", name: "Sikkim" },
+  { code: "12", name: "Arunachal Pradesh" },
+  { code: "13", name: "Nagaland" },
+  { code: "14", name: "Manipur" },
+  { code: "15", name: "Mizoram" },
+  { code: "16", name: "Tripura" },
+  { code: "17", name: "Meghalaya" },
+  { code: "18", name: "Assam" },
+  { code: "19", name: "West Bengal" },
+  { code: "20", name: "Jharkhand" },
+  { code: "21", name: "Odisha" },
+  { code: "22", name: "Chhattisgarh" },
+  { code: "23", name: "Madhya Pradesh" },
+  { code: "24", name: "Gujarat" },
+  { code: "26", name: "Dadra and Nagar Haveli and Daman and Diu" },
+  { code: "27", name: "Maharashtra" },
+  { code: "29", name: "Karnataka" },
+  { code: "30", name: "Goa" },
+  { code: "31", name: "Lakshadweep" },
+  { code: "32", name: "Kerala" },
+  { code: "33", name: "Tamil Nadu" },
+  { code: "34", name: "Puducherry" },
+  { code: "35", name: "Andaman and Nicobar Islands" },
+  { code: "36", name: "Telangana" },
+  { code: "37", name: "Andhra Pradesh" },
+  { code: "38", name: "Ladakh" },
+  { code: "97", name: "Other Territory" },
+  { code: "99", name: "Centre Jurisdiction" },
+];
+
+export function gstStateName(code: string | null | undefined): string | null {
+  return GST_STATES.find((s) => s.code === code)?.name ?? null;
+}
+
+export interface PlaceOfSupplyInput {
+  supplier: Pick<GstSettings, "state" | "stateCode" | "splitRule">;
+  recipient: { gstin?: string | null; state?: string | null; stateCode?: string | null };
+}
+
+export interface PlaceOfSupply {
+  state: string;
+  stateCode: string;
+  /** IGST when true; CGST + SGST when false. */
+  interState: boolean;
+}
+
+/**
+ * Place of supply for a B2B service invoice to an organisation (IGST Act
+ * s.12(2)): a registered recipient's location, else the recipient's address
+ * when known, else the supplier's location. Supply is intra-state (CGST + SGST)
+ * only when that place is the supplier's own state. A registered recipient's
+ * state is read from its GSTIN, which is authoritative over the profile field.
+ * `ALWAYS_IGST` forces IGST regardless.
+ */
+export function orgPlaceOfSupply({ supplier, recipient }: PlaceOfSupplyInput): PlaceOfSupply {
+  const gstinCode = recipient.gstin?.trim().slice(0, 2) || null;
+  const code = gstinCode ?? (recipient.stateCode || null) ?? supplier.stateCode;
+  const known = code === supplier.stateCode ? supplier.state : (gstStateName(code) ?? recipient.state ?? code);
+  return {
+    state: known,
+    stateCode: code,
+    interState: supplier.splitRule === "ALWAYS_IGST" || code !== supplier.stateCode,
+  };
+}
+
+/** GST split for a known place of supply. */
+export function splitTaxFor(gstPaise: number, interState: boolean) {
+  return splitTax(gstPaise, interState ? "ALWAYS_IGST" : "SUPPLIER_STATE");
+}

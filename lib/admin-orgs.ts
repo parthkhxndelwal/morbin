@@ -243,7 +243,7 @@ export interface AdminOrgDetail {
   status: "ACTIVE" | "SUSPENDED";
   paymentAccountStatus: PaymentAccountStatus;
   createdAt: string;
-  contact: { email: string | null; phone: string | null; gstin: string | null; address: string | null };
+  contact: { email: string | null; phone: string | null; gstin: string | null; address: string | null; state: string | null };
   owner: { id: string; name: string; email: string; hasPassword: boolean } | null;
   fee: { customBps: number | null; effectiveBps: number; defaultBps: number; bearer: "CUSTOMER" | "ORGANISER" };
   feeHistory: { fromBps: number | null; toBps: number | null; note: string | null; at: string }[];
@@ -289,6 +289,7 @@ export async function getAdminOrgDetail(id: string): Promise<AdminOrgDetail | nu
       phone: org.contactPhone ?? null,
       gstin: org.gstin ?? null,
       address: org.address ?? null,
+      state: org.state && org.stateCode ? `${org.state} (${org.stateCode})` : null,
     },
     owner: owner
       ? { id: owner._id!.toString(), name: owner.name ?? "", email: owner.email, hasPassword: !!owner.passwordHash }

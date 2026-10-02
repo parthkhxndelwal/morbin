@@ -55,6 +55,12 @@ export async function getDb(): Promise<Db> {
 /** Create unique indexes. Call explicitly (e.g. post-deploy script), never at import. */
 export async function ensureIndexes(): Promise<void> {
   const db = await getDb();
+  // Superseded by the per-kind partial indexes below: ORG_FEE invoices have
+  // no orderId, and a plain unique index would let only one of them exist.
+  await db
+    .collection("invoices")
+    .dropIndex("orderId_1_kind_1")
+    .catch(() => {});
   await Promise.all([
     db.collection("users").createIndex({ email: 1 }, { unique: true }),
     // Authorization reads every admin request by role; keep it indexed.
@@ -139,7 +145,14 @@ export async function ensureIndexes(): Promise<void> {
     db.collection("feeChanges").createIndex({ organizationId: 1, at: -1 }),
     db.collection("rateLimits").createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
     db.collection("invoices").createIndex({ number: 1 }, { unique: true }),
-    db.collection("invoices").createIndex({ orderId: 1, kind: 1 }, { unique: true }),
+    db.collection("invoices").createIndex(
+      { orderId: 1, kind: 1 },
+      { unique: true, name: "invoice_per_order", partialFilterExpression: { kind: "CUSTOMER_FEE" } },
+    ),
+    db.collection("invoices").createIndex(
+      { payoutId: 1, kind: 1 },
+      { unique: true, name: "invoice_per_payout", partialFilterExpression: { kind: "ORG_FEE" } },
+    ),
     db.collection("emailDeliveries").createIndex(
       { kind: 1, orderId: 1 },
       { unique: true, partialFilterExpression: { kind: "TICKET_PDF" } },

@@ -446,6 +446,7 @@ export interface PayoutDetail extends PayoutRow {
   note: string | null;
   statementDocId: string | null;
   breakdownDocId: string | null;
+  invoiceDocId: string | null;
   acknowledgedAt: string | null;
   messages: { id: string; authorRole: "OWNER" | "ADMIN"; message: string; createdAt: string }[];
 }
@@ -482,6 +483,7 @@ export async function getPayoutDetail(id: string, orgId: string | null): Promise
     note: p.note,
     statementDocId: p.statementDocId,
     breakdownDocId: p.breakdownDocId,
+    invoiceDocId: p.invoiceDocId ?? null,
     acknowledgedAt: p.acknowledgedAt?.toISOString() ?? null,
     messages: messages.map((m) => ({
       id: m._id!.toString(),
