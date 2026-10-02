@@ -52,8 +52,10 @@ async function rejects(fn: () => Promise<unknown>, match: RegExp) {
   try {
     await fn();
   } catch (e) {
-    assert.ok(e instanceof TxAbort, `expected TxAbort, got ${e}`);
-    assert.match(e.message, match);
+    // By name, not instanceof: tsx can load lib/tx.ts once as ESM (from this
+    // script) and once as CJS (from lib modules), giving two TxAbort classes.
+    assert.ok(e instanceof TxAbort || e?.constructor?.name === "TxAbort", `expected TxAbort, got ${e}`);
+    assert.match((e as Error).message, match);
     return;
   }
   assert.fail("expected an error");
