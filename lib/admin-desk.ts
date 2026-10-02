@@ -72,7 +72,7 @@ export interface PlatformOverview {
   owedToOrgsPaise: number;
   inDraftPayoutsPaise: number;
   orgs: { active: number; suspended: number; unverified: number };
-  waiting: { applications: number; refunds: number; failedRefunds: number; payoutQueries: number; failedEmails: number };
+  waiting: { applications: number; refunds: number; failedRefunds: number; payoutQueries: number; failedEmails: number; dataRequests: number; overdueDataRequests: number };
 }
 
 /**
@@ -96,7 +96,7 @@ export async function getPlatformOverview(): Promise<PlatformOverview> {
       .toArray()
       .then((r) => r[0] ?? { sales: 0, fees: 0 });
 
-  const [all, recent, owed, drafts, orgStatus, unverified, applications, refunds, failedRefunds, queries, failedEmails] =
+  const [all, recent, owed, drafts, orgStatus, unverified, applications, refunds, failedRefunds, queries, failedEmails, dataRequests, overdueDataRequests] =
     await Promise.all([
       sumOrders(sold),
       sumOrders({ ...sold, createdAt: { $gte: since } }),
@@ -118,6 +118,9 @@ export async function getPlatformOverview(): Promise<PlatformOverview> {
       db.collection("refundCases").countDocuments({ status: "FAILED" }),
       db.collection<Payout>("payouts").countDocuments({ status: "DISPUTED" }),
       db.collection("emailDeliveries").countDocuments({ status: "FAILED" }),
+      db.collection("dataRequests").countDocuments({ status: "OPEN" }),
+      // Due within a week, or already past it.
+      db.collection("dataRequests").countDocuments({ status: "OPEN", dueAt: { $lt: new Date(Date.now() + 7 * 86_400_000) } }),
     ]);
   const statusCount = new Map(orgStatus.map((s) => [s._id, s.n]));
   return {
@@ -128,7 +131,7 @@ export async function getPlatformOverview(): Promise<PlatformOverview> {
     owedToOrgsPaise: owed[0]?.net ?? 0,
     inDraftPayoutsPaise: drafts[0]?.net ?? 0,
     orgs: { active: statusCount.get("ACTIVE") ?? 0, suspended: statusCount.get("SUSPENDED") ?? 0, unverified },
-    waiting: { applications, refunds, failedRefunds, payoutQueries: queries, failedEmails },
+    waiting: { applications, refunds, failedRefunds, payoutQueries: queries, failedEmails, dataRequests, overdueDataRequests },
   };
 }
 

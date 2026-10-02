@@ -20,6 +20,7 @@ export const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024;
 const TYPES: Record<string, { ext: string; magic?: number[] }> = {
   "application/pdf": { ext: "pdf", magic: [0x25, 0x50, 0x44, 0x46, 0x2d] }, // %PDF-
   "text/csv": { ext: "csv" },
+  "application/json": { ext: "json" },
   "image/png": { ext: "png", magic: [0x89, 0x50, 0x4e, 0x47] },
   "image/jpeg": { ext: "jpg", magic: [0xff, 0xd8, 0xff] },
 };

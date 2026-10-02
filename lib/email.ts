@@ -430,6 +430,39 @@ export async function flushEmailQueue(limit = 20): Promise<{ sent: number; faile
         }[stage];
         html = `<div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#111">
           <p>Hi ${attendeeName},</p>${body}</div>`;
+      } else if (job.kind === "DATA_REQUEST_VERIFY" || job.kind === "DATA_REQUEST_RESULT") {
+        const what = {
+          ACCESS: "a copy of your data",
+          CORRECTION: "a correction to your data",
+          ERASURE: "erasure of your data",
+        }[meta.dataRequestType ?? "ACCESS"];
+        const note = meta.message ? `<p>${esc(meta.message).replace(/\n/g, "<br>")}</p>` : "";
+        if (job.kind === "DATA_REQUEST_VERIFY") {
+          subject = "Confirm your data request — Morbin";
+          html = `<div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#111">
+            <p>Someone — hopefully you — asked Morbin for ${what} held for this email address.</p>
+            <p>Confirm it's you and we'll handle it within the time the law allows (90 days at most, usually much sooner).
+               The link works once and expires in 24 hours.</p>
+            ${emailButton(esc(meta.link ?? ""), "Confirm my request")}
+            <p style="color:#777;font-size:12px">If you didn't ask for this, ignore this email and nothing will happen.</p>
+          </div>`;
+        } else if (meta.dataRequestRejected) {
+          subject = "Your data request — Morbin";
+          html = `<div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#111">
+            <p>We couldn't complete your request for ${what}:</p>${note}
+            <p>You can reply to this email, or contact our grievance officer at ${esc(process.env.SUPPORT_EMAIL ?? "support@morbin.space")}.</p>
+          </div>`;
+        } else {
+          subject = meta.dataRequestType === "ACCESS" ? "Your Morbin data export is ready" : "Your data request is complete — Morbin";
+          html = `<div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#111">
+            <p>We've completed your request for ${what}.</p>${note}
+            ${
+              meta.link
+                ? `${emailButton(esc(meta.link), "Download my data")}<p style="color:#777;font-size:12px">The link downloads your data once and expires in 7 days.</p>`
+                : ""
+            }
+          </div>`;
+        }
       } else if (job.kind === "ACCOUNT_SETUP") {
         const organizationName = esc(meta.organizationName ?? "your organisation");
         subject = `Set up your Morbin account for ${meta.organizationName ?? "your organisation"}`;
@@ -473,7 +506,9 @@ export async function flushEmailQueue(limit = 20): Promise<{ sent: number; faile
         html,
         attachments,
         replyTo:
-          job.kind === "APPLICATION" || job.kind === "REFUND_MESSAGE" ? (process.env.SUPPORT_EMAIL ?? null) : null,
+          job.kind === "APPLICATION" || job.kind === "REFUND_MESSAGE" || job.kind === "DATA_REQUEST_RESULT"
+            ? (process.env.SUPPORT_EMAIL ?? null)
+            : null,
       });
       if (!r.ok) throw new Error("send failed");
       await db.collection("emailDeliveries").updateOne(

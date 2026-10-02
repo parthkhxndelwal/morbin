@@ -252,6 +252,11 @@ export interface Order {
    * the row. `claim` = this order holds the row's one-ticket claim.
    */
   lookupKeys?: { stepId: string; datasetId: string; key: string; claim: boolean }[] | null;
+  /** DPDP consent carried over from the checkout session. */
+  consentAt?: Date | null;
+  noticeVersion?: string | null;
+  /** Set when a data-erasure request anonymised this order's personal data. */
+  piiErasedAt?: Date | null;
   /** Captured at the top of the funnel, so a QR-code poster is attributable. */
   utm?: { source: string | null; medium: string | null; campaign: string | null } | null;
   /**
@@ -374,6 +379,9 @@ export type EmailKind =
   | "ACCOUNT_SETUP"
   /** Organisation applications: received, more info needed, approved, rejected. */
   | "APPLICATION"
+  /** Data requests: confirm the request, then its outcome. */
+  | "DATA_REQUEST_VERIFY"
+  | "DATA_REQUEST_RESULT"
   /** A Morbin admin writing to the customer about a refund case. */
   | "REFUND_MESSAGE";
 
@@ -413,6 +421,9 @@ export interface EmailRecord {
     /** APPLICATION: which update this is, and Morbin's message if any. */
     applicationStage?: "RECEIVED" | "INFO_REQUESTED" | "APPROVED" | "REJECTED";
     message?: string | null;
+    /** DATA_REQUEST_*: which request, and whether it was declined. */
+    dataRequestType?: DataRequestType;
+    dataRequestRejected?: boolean;
   } | null;
 }
 
@@ -624,6 +635,9 @@ export interface CheckoutSession {
    */
   test?: boolean;
   testFlow?: { version: number; steps: FlowStep[] } | null;
+  /** DPDP: when the buyer accepted the checkout notice, and which version. */
+  consentAt?: Date | null;
+  noticeVersion?: string | null;
   createdAt: Date;
   updatedAt: Date;
   expiresAt: Date;
@@ -844,7 +858,9 @@ export type StoredDocumentKind =
   | "PAYOUT_BREAKDOWN"
   | "TICKET_PDF"
   | "REFUND_PROOF"
-  | "ORG_FEE_INVOICE";
+  | "ORG_FEE_INVOICE"
+  /** A data-access export for a verified data request (JSON). */
+  | "DATA_EXPORT";
 
 /**
  * The bank account a payout is transferred to.
@@ -921,6 +937,37 @@ export interface DatasetRow {
   keyNormalised: string;
   /** The import that last wrote this row (REPLACE removes rows from older imports). */
   importId?: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export type DataRequestType = "ACCESS" | "CORRECTION" | "ERASURE";
+export type DataRequestStatus = "UNVERIFIED" | "OPEN" | "DONE" | "REJECTED";
+
+/**
+ * A data principal's request (DPDP): access, correction or erasure of what
+ * Morbin holds for an email address. Verified by a one-time emailed link
+ * before it reaches the admin queue.
+ */
+export interface DataRequest {
+  _id?: ObjectId;
+  type: DataRequestType;
+  email: string;
+  details: string;
+  status: DataRequestStatus;
+  tokenHash: string | null;
+  tokenExpiresAt: Date | null;
+  verifiedAt: Date | null;
+  /** Statutory response deadline, from verification. */
+  dueAt: Date | null;
+  outcome: string | null;
+  handledBy: string | null;
+  handledAt: Date | null;
+  /** ACCESS: the export document and its one-time download token. */
+  exportDocId?: string | null;
+  downloadTokenHash?: string | null;
+  downloadExpiresAt?: Date | null;
+  downloadedAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }

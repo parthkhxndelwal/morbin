@@ -18,6 +18,8 @@ export default async function AdminOverviewPage() {
     { n: o.waiting.applications, label: "applications to review", href: "/dashboard/admin/applications" },
     { n: o.waiting.refunds, label: "refunds awaiting approval", href: "/dashboard/admin/refunds" },
     { n: o.waiting.failedRefunds, label: "refunds failed at Razorpay", href: "/dashboard/admin/refunds", urgent: true },
+    { n: o.waiting.overdueDataRequests, label: "data requests due within a week", href: "/dashboard/admin/privacy", urgent: true },
+    { n: o.waiting.dataRequests - o.waiting.overdueDataRequests, label: "data requests to answer", href: "/dashboard/admin/privacy" },
     { n: o.waiting.payoutQueries, label: "payout queries to answer", href: "/dashboard/admin/payouts" },
     { n: o.orgs.unverified, label: "organisations not verified for payments", href: "/dashboard/admin/orgs" },
     { n: o.waiting.failedEmails, label: "emails that couldn't be delivered", href: "/dashboard/admin/audit", urgent: true },

@@ -35,6 +35,7 @@ const SEGMENTS: Record<string, string> = {
   organisations: "Organisations",
   orgs: "Organisations",
   applications: "Applications",
+  privacy: "Data requests",
   audit: "Audit log",
 };
 

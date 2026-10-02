@@ -71,6 +71,7 @@ export default async function DashboardLayout({
         { title: "Applications", url: "/dashboard/admin/applications", icon: "applications" },
         { title: "Payouts", url: "/dashboard/admin/payouts", icon: "payouts" },
         { title: "Refunds", url: "/dashboard/admin/refunds", icon: "refunds" },
+        { title: "Data requests", url: "/dashboard/admin/privacy", icon: "privacy" },
         { title: "Audit log", url: "/dashboard/admin/audit", icon: "audit" },
         { title: "Settings", url: "/dashboard/admin/settings", icon: "settings" },
       ],
